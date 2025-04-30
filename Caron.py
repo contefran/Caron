@@ -19,6 +19,19 @@ frame_rgb = np.stack((frame_norm,) * 3, axis=-1)
 frame_rgb = frame_rgb.astype(np.float32) / np.max(frame_rgb)
 frame_flattened = frame_rgb.flatten()
 
+@njit
+def normalize_frame(frame):
+    frame_min = np.min(frame)
+    frame_max = np.max(frame)
+    norm = (frame - frame_min) / (frame_max - frame_min + 1e-8)
+    for i in range(norm.shape[0]):
+        for j in range(norm.shape[1]):
+            if norm[i, j] < 0:
+                norm[i, j] = 0.0
+            elif norm[i, j] > 1:
+                norm[i, j] = 1.0
+    return norm
+
 dpg.create_context()
 #with dpg.font_registry():
 #    big_font = dpg.add_font("C:/Windows/Fonts/BASKVILL.TTF", 20, tag="big_font")
@@ -45,10 +58,7 @@ def update_frame():
     if (running and (current_time - last_update_time) >= 1 / speed) or frame_index == 0:
         last_update_time = current_time
         frame = frames[frame_index]
-        frame_min = np.min(frame)
-        frame_max = np.max(frame)
-        frame_norm = (frame - frame_min) / (frame_max - frame_min)
-        frame_norm = np.clip(frame_norm, 0, 1)
+        frame_norm = normalize_frame(frame)
         colormap = cm.inferno
         frame_colored = colormap(frame_norm)  # Returns an RGBA array
         frame_rgb = (frame_colored[..., :3] * 255).astype(np.uint8)
