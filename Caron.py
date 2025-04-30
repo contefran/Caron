@@ -2,6 +2,7 @@ import numpy as np
 from matplotlib import cm  # Import colormap functionality
 import time
 import dearpygui.dearpygui as dpg
+from numba import njit
 
 frames = np.load('Simulation.npy')
 
