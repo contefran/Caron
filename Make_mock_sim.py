@@ -9,15 +9,16 @@ import argparse
 
 # Parse arguments
 parser = argparse.ArgumentParser(description="Generate a mock simulation set.")
-parser.add_argument("--num_frames", type=int, default=100, help="Number of frames to generate.")
-parser.add_argument("--img_size", type=int, default=1000, help="Size of the square image (pixels).")
-parser.add_argument("--initial_aperture_deg", type=float, default=30, help="Initial aperture angle in degrees.")
-parser.add_argument("--final_aperture_deg", type=float, default=120, help="Final aperture angle in degrees.")
-parser.add_argument("--initial_sigma", type=float, default=0.5, help="Initial Gaussian blur sigma.")
-parser.add_argument("--final_sigma", type=float, default=10, help="Final Gaussian blur sigma.")
-parser.add_argument("--decay_length", type=float, default=0.3, help="Characteristic radial decay length, in unit of image size.")
-parser.add_argument("--noise_amplitude_signal", type=float, default=0.15, help="Noise amplitude inside the cone.")
-parser.add_argument("--noise_amplitude_background", type=float, default=0.15, help="Noise amplitude outside the cone.")
+parser.add_argument("--num_frames", type=int, default=100, help="Number of frames to generate [default=100].")
+parser.add_argument("--img_size", type=int, default=1000, help="Linear size of the square image (pixels) [default=1000].")
+parser.add_argument("--init_ap", type=float, default=10, help="Initial aperture angle in degrees [default=10].")
+parser.add_argument("--final_ap", type=float, default=160, help="Final aperture angle in degrees [default=160].")
+parser.add_argument("--init_sigma", type=float, default=0.5, help="Initial Gaussian blur sigma [default=0.5].")
+parser.add_argument("--final_sigma", type=float, default=30, help="Final Gaussian blur sigma [default=30].")
+parser.add_argument("--dec_len", type=float, default=0.2, help="Characteristic radial decay length, in unit of image size [default=0.2].")
+parser.add_argument("--inside_noise", type=float, default=0.15, help="Noise amplitude inside the cone [default=0.15].")
+parser.add_argument("--outside_noise", type=float, default=0.15, help="Noise amplitude outside the cone [default=0.15].")
+parser.add_argument("--save_frames", action="store_true", help="Select to save to disk an image every 10 frames.")
 args = parser.parse_args()
 
 # Settings
@@ -25,14 +26,14 @@ num_frames = args.num_frames
 img_size = args.img_size
 initial_centre = (img_size // 2, img_size // 2)  # (y, x)
 final_centre = (img_size // 2, 20)  # towards left
-initial_aperture_deg = args.initial_aperture_deg
-final_aperture_deg = args.final_aperture_deg
-initial_sigma = args.initial_sigma
+initial_aperture_deg = args.init_ap
+final_aperture_deg = args.final_ap
+initial_sigma = args.init_sigma
 final_sigma = args.final_sigma
-decay_length = img_size * args.decay_length
-noise_amplitude_signal = args.noise_amplitude_signal
-noise_amplitude_background = args.noise_amplitude_background
-
+decay_length = img_size * args.dec_len
+noise_amplitude_signal = args.inside_noise
+noise_amplitude_background = args.outside_noise
+save_frames = args.save_frames
 
 # Precompute coordinate grid
 y, x = np.indices((img_size, img_size))
@@ -141,15 +142,16 @@ os.makedirs(output_dir, exist_ok=True)
 
 
 # Save an image of a few frames
-inferno_cmap = cm.inferno
-for idx, frame in enumerate(frames):
-    filename = os.path.join(output_dir, f"frame_{idx:03d}.png")
-    # Apply colormap: map [0,1] --> RGBA with inferno
-    frame_coloured = inferno_cmap(frame)  # returns RGBA array
-    # Drop alpha channel (keep only RGB)
-    frame_rgb = (255 * frame_coloured[..., :3]).astype(np.uint8)
-        # Save RGB image
-    imageio.imwrite(filename, frame_rgb)
+if save_frames:
+    inferno_cmap = cm.inferno
+    for idx, frame in enumerate(frames):
+        filename = os.path.join(output_dir, f"frame_{idx:03d}.png")
+        # Apply colormap: map [0,1] --> RGBA with inferno
+        frame_coloured = inferno_cmap(frame)  # returns RGBA array
+        # Drop alpha channel (keep only RGB)
+        frame_rgb = (255 * frame_coloured[..., :3]).astype(np.uint8)
+            # Save RGB image
+        imageio.imwrite(filename, frame_rgb)
 
 
 # save the sim to disk
