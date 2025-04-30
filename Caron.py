@@ -1,5 +1,5 @@
 import numpy as np
-from matplotlib import cm  # Import colormap functionality
+from matplotlib import cm
 import time
 import dearpygui.dearpygui as dpg
 from numba import njit
@@ -18,6 +18,8 @@ frame_norm = (frame - frame_min) / (frame_max - frame_min)
 frame_rgb = np.stack((frame_norm,) * 3, axis=-1)
 frame_rgb = frame_rgb.astype(np.float32) / np.max(frame_rgb)
 frame_flattened = frame_rgb.flatten()
+
+inferno_lut = (cm.inferno(np.linspace(0, 1, 256))[:, :3] * 255).astype(np.uint8) # LUT for inferno colormap
 
 @njit
 def normalize_frame(frame):
@@ -59,9 +61,11 @@ def update_frame():
         last_update_time = current_time
         frame = frames[frame_index]
         frame_norm = normalize_frame(frame)
-        colormap = cm.inferno
-        frame_colored = colormap(frame_norm)  # Returns an RGBA array
-        frame_rgb = (frame_colored[..., :3] * 255).astype(np.uint8)
+        #colormap = cm.inferno
+        #frame_colored = colormap(frame_norm)  # Returns an RGBA array
+        #frame_rgb = (frame_colored[..., :3] * 255).astype(np.uint8)
+        indices = (frame_norm * 255).astype(np.uint8)
+        frame_rgb = inferno_lut[indices] # Apply LUT, faster than colormap
         frame_flattened = frame_rgb.flatten().astype(np.float32) / 255.0
         dpg.set_value("frame_tag", frame_flattened)
         frame_index = (frame_index + 1) % len(frames)
