@@ -1,5 +1,5 @@
 # Caron
-A wannabe tool to visualize the outcome of a simulation in real time
+A tool to visualize the outcome of an MHD simulation in real time
 
 ## Usage
 
