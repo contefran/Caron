@@ -83,7 +83,7 @@ with dpg.window(label="Jet Inspector", width=1100, height=1000, no_close=True, n
             dpg.add_button(label="Start", callback=start_callback, width=80, height=200)
             dpg.add_button(label="Stop", callback=stop_callback, width=80, height=200)
 
-dpg.create_viewport(title="Our lovely Caron", width=1100, height=1000)
+dpg.create_viewport(title="Caron", width=1100, height=1000)
 
 dpg.setup_dearpygui()
 
