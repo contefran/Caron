@@ -1,6 +1,7 @@
 # Caron
+
 A wannabe tool to visualize the outcome of a simulation in real time
-=======
+
 ## Usage
 
 At the moment it reads a file (`Simulation.npy`), so if you don't have it you need to create one.
