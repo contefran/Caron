@@ -1,13 +1,12 @@
-# imports
+"""Simulation class producing data for the visualization."""
+from typing import Any
 
-import numpy as np
-from data import Data
-
+from caron.data import Data
 
 class Simulation:
     """Produces 2D frames and pushes them into the Data buffer."""
 
-    def __init__(self, data: Data, n_frames: int, size: int, **kwargs):
+    def __init__(self, data: Data, n_frames: int, size: int, **kwargs: Any) -> None:
         self.data = data
         self.n_frames = n_frames
         self.size = size

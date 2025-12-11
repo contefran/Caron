@@ -1,8 +1,8 @@
 # imports 
 import argparse
-from data import Data
-from simulation import Simulation
-from visualization import Visualization
+from caron.data import Data
+from caron.simulation import Simulation
+from caron.visualization import Visualization
 
 class Main:
     def __init__(self):
