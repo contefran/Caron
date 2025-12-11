@@ -4,7 +4,6 @@ from matplotlib import colormaps as cm
 import dearpygui.dearpygui as dpg
 from numba import njit
 from data import Data
-from collections import deque
 
 
 @njit
@@ -41,7 +40,6 @@ class Visualization:
             frames_array = np.load(self.args.sim_file)
             for frame in frames_array:
                 self.data.push_frame(frame) # fill the buffer with the mock sim. It's a deque
-            #self.frames = deque(frames_array) 
         self.frames = self.data.buffer  # already a deque, as set in Data
         if not self.frames:
             raise RuntimeError("Visualization initialised with an empty buffer.")
@@ -86,7 +84,7 @@ class Visualization:
             dpg.add_raw_texture(
                 int(self.sim_size),
                 int(self.sim_size),
-                default_value=self.frame_flattened,
+                default_value=self.frame_flattened.tolist(),
                 format=dpg.mvFormat_Float_rgb,
                 tag="frame_tag",
             )
@@ -139,7 +137,7 @@ class Visualization:
 
         dpg.setup_dearpygui()
 
-        # Kick off the first update, as in the original script
+        # Kick off the first update
         _update_frame(None, None, self)
 
         dpg.show_viewport()
@@ -166,10 +164,12 @@ def _update_frame(sender, app_data, user_data: Visualization):
     """ Everything lives on user_data instead of self or globals."""
     current_time = time.time()
 
+    # Check timing
     if (user_data.running and (current_time - user_data.last_update_time) >= 1 / user_data.fps) or user_data.frame_index == 0:
+        print(f"time since last update: {current_time - user_data.last_update_time:.3f}s")
         user_data.last_update_time = current_time
 
-        #frame = user_data.frames[user_data.frame_index]
+        # Act on the buffer
         frame = user_data.data.pop_frame()
         if frame is None:
             print("No more frames to visualise, stopping.")
@@ -178,17 +178,14 @@ def _update_frame(sender, app_data, user_data: Visualization):
         else:
             frame_norm = normalize_frame(frame)
 
-            # Apply LUT instead of colormap (same optimisation as before)
+            # Apply LUT instead of colormap
             indices = (frame_norm * 255).astype(np.uint8)
             frame_rgb = user_data.inferno_lut[indices]
             frame_flattened = frame_rgb.flatten().astype(np.float32) / 255.0
-
             dpg.set_value("frame_tag", frame_flattened)
-
-            #user_data.frame_index = (user_data.frame_index + 1) % len(user_data.frames)
             user_data.frame_index += 1 # just increment, stop when no more frames
-
-    # Same scheduling logic: re-register callback a couple of frames ahead
+        
+    # Re-register callback a couple of frames ahead
     with dpg.mutex():
-        target_frame = dpg.get_frame_count() + 2
+        target_frame = dpg.get_frame_count() + 1
         dpg.set_frame_callback(target_frame, _update_frame, user_data=user_data)
