@@ -44,14 +44,13 @@ class Visualization:
         self.sim_size: int = self.frames[0].shape[1]
         print(f"Loaded simulation with {len(self.frames)} frames of size {self.sim_size}x{self.sim_size} as initial buffering.")
 
-        # Playback state (were globals before)
         self.running: bool = False
-        self.speed: int = 10  # interpreted as FPS (slider label says FPS)
+        self.fps: int = self.args.viz_fps
         self.last_update_time: float = time.time()
         self.frame_index: int = 0
 
         # Precompute first frame to initialise the texture
-        frame = self.frames[0]
+        frame = self.frames[0] # still works with deque, I'm already in love
         frame_min = np.min(frame)
         frame_max = np.max(frame)
         frame_norm = (frame - frame_min) / (frame_max - frame_min)
@@ -64,30 +63,26 @@ class Visualization:
             cm['inferno'](np.linspace(0, 1, 256))[:, :3] * 255
         ).astype(np.uint8)
 
-        # DearPyGui bookkeeping
-        self._texture_tag: str = "frame_tag"
-        self._font_tag: str = "big_font"
+        # DearPyGui tags
+        #self._font_tag: str = "big_font"
 
     # Runs
     # ------------------------------------------------------------------
     def run(self) -> None:
-        """
-        Set up DearPyGui and start the visualisation.
-        """
+        """Set up DearPyGui and start the visualisation."""
         dpg.create_context()
 
-        # If you want the font back, uncomment the registry and bind_font below
+        # To get the font back, uncomment the registry and bind_font below
         # with dpg.font_registry():
         #     dpg.add_font("C:/Windows/Fonts/BKANT.TTF", 20, tag=self._font_tag)
 
         with dpg.texture_registry(show=True):
-            # Same call as before, just expanded the ellipsis:
             dpg.add_raw_texture(
                 int(self.sim_size),
                 int(self.sim_size),
                 default_value=self.frame_flattened,
                 format=dpg.mvFormat_Float_rgb,
-                tag=self._texture_tag,
+                tag="frame_tag",
             )
 
         # Window / layout
@@ -107,13 +102,13 @@ class Visualization:
                     dpg.add_slider_int(
                         label="Speed (FPS)",
                         height=40,
-                        default_value=self.speed,
+                        default_value=self.fps,
                         min_value=1,
-                        max_value=60,
+                        max_value=self.fps,
                         callback=_speed_callback,
                         user_data=self,
                     )
-                    dpg.add_image(self._texture_tag)
+                    dpg.add_image("frame_tag")
                 with dpg.group(label="Start&Stop"):
                     dpg.add_button(
                         label="Start",
@@ -158,7 +153,7 @@ def _stop_callback(sender, app_data, user_data: Visualization):
 
 def _speed_callback(sender, app_data, user_data: Visualization):
     # app_data is the slider value
-    user_data.speed = int(app_data)
+    user_data.fps = int(app_data)
 
 
 def _update_frame(sender, app_data, user_data: Visualization):
@@ -169,7 +164,7 @@ def _update_frame(sender, app_data, user_data: Visualization):
     current_time = time.time()
 
     # Same timing condition as before
-    if (user_data.running and (current_time - user_data.last_update_time) >= 1 / user_data.speed) or user_data.frame_index == 0:
+    if (user_data.running and (current_time - user_data.last_update_time) >= 1 / user_data.fps) or user_data.frame_index == 0:
         user_data.last_update_time = current_time
 
         frame = user_data.frames[user_data.frame_index]
@@ -180,7 +175,7 @@ def _update_frame(sender, app_data, user_data: Visualization):
         frame_rgb = user_data.inferno_lut[indices]
         frame_flattened = frame_rgb.flatten().astype(np.float32) / 255.0
 
-        dpg.set_value(user_data._texture_tag, frame_flattened)
+        dpg.set_value("frame_tag", frame_flattened)
 
         user_data.frame_index = (user_data.frame_index + 1) % len(user_data.frames)
 
