@@ -1,9 +1,8 @@
 # imports
 import numpy as np
 from scipy.ndimage import gaussian_filter
-from matplotlib import cm
+import matplotlib
 import os
-import sys
 import imageio.v2 as imageio
 from tqdm import tqdm
 import argparse
@@ -144,7 +143,7 @@ os.makedirs(output_dir, exist_ok=True)
 
 # Save an image of a few frames
 if save_frames:
-    inferno_cmap = cm.inferno
+    inferno_cmap = matplotlib.colormaps['inferno']
     for idx, frame in enumerate(frames):
         filename = os.path.join(output_dir, f"frame_{idx:03d}.png")
         # Apply colormap: map [0,1] --> RGBA with inferno
@@ -156,4 +155,4 @@ if save_frames:
 
 
 # save the sim to disk
-np.save('Simulation.npy', frames)
+np.save('mock_sim.npy', frames)
