@@ -5,6 +5,8 @@ import dearpygui.dearpygui as dpg
 from numba import njit
 
 frames = np.load('Simulation.npy')
+sim_size = frames.shape[1]
+print(f"Loaded simulation with {frames.shape[0]} frames of size {sim_size}x{sim_size}")
 
 running = False
 speed = 10  # seconds per frame
@@ -36,11 +38,9 @@ def normalize_frame(frame):
 
 dpg.create_context()
 #with dpg.font_registry():
-#    big_font = dpg.add_font("C:/Windows/Fonts/BASKVILL.TTF", 20, tag="big_font")
-with dpg.font_registry():
-    big_font = dpg.add_font("C:/Windows/Fonts/BKANT.TTF", 20, tag="big_font")
+#    big_font = dpg.add_font("C:/Windows/Fonts/BKANT.TTF", 20, tag="big_font")
 with dpg.texture_registry(show=True):
-    dpg.add_raw_texture(1000, 1000, default_value=frame_flattened, format=dpg.mvFormat_Float_rgb, tag="frame_tag")
+    dpg.add_raw_texture(int(sim_size), int(sim_size), default_value=frame_flattened, format=dpg.mvFormat_Float_rgb, tag="frame_tag")
 
 def start_callback():
     global running
@@ -73,17 +73,17 @@ def update_frame():
         target_frame = dpg.get_frame_count() + 2
         dpg.set_frame_callback(target_frame, update_frame)
 
-with dpg.window(label="Jet Inspector", width=1100, height=1000, no_close=True, no_move=True, no_resize=False):
+with dpg.window(label="Jet Inspector", width=sim_size*1.1, height=sim_size, no_close=True, no_move=True, no_resize=False):
     dpg.bind_font("big_font")
     with dpg.group(label="Visualizator", horizontal=True):
         with dpg.group(label="Map and slider"):
-            dpg.add_slider_int(label="Speed (FPS)", height=40, default_value=10, min_value=1, max_value=20, callback=speed_callback)
+            dpg.add_slider_int(label="Speed (FPS)", height=40, default_value=10, min_value=1, max_value=60, callback=speed_callback)
             dpg.add_image("frame_tag")
         with dpg.group(label="Start&Stop"):
             dpg.add_button(label="Start", callback=start_callback, width=80, height=200)
             dpg.add_button(label="Stop", callback=stop_callback, width=80, height=200)
 
-dpg.create_viewport(title="Caron", width=1100, height=1000)
+dpg.create_viewport(title="Our lovely Caron", width=int(sim_size*1.1), height=int(sim_size))
 
 dpg.setup_dearpygui()
 
