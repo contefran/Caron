@@ -10,7 +10,7 @@ import argparse
 # Parse arguments
 parser = argparse.ArgumentParser(description="Generate a mock simulation set.")
 parser.add_argument("--num_frames", type=int, default=100, help="Number of frames to generate [default=100].")
-parser.add_argument("--img_size", type=int, default=1000, help="Linear size of the square image (pixels) [default=1000].")
+parser.add_argument("--img_size", type=int, default=512, help="Linear size of the square image (pixels) [default=512].")
 parser.add_argument("--init_ap", type=float, default=10, help="Initial aperture angle in degrees [default=10].")
 parser.add_argument("--final_ap", type=float, default=160, help="Final aperture angle in degrees [default=160].")
 parser.add_argument("--init_sigma", type=float, default=0.5, help="Initial Gaussian blur sigma [default=0.5].")
