@@ -1,10 +1,11 @@
-from data import Data
 import time
 import numpy as np
-from collections import deque
 from matplotlib import colormaps as cm 
 import dearpygui.dearpygui as dpg
 from numba import njit
+from data import Data
+from collections import deque
+
 
 @njit
 def normalize_frame(frame):

@@ -19,6 +19,7 @@ class Main:
         )
 
 
+
     @staticmethod
     def parse_args():
         parser = argparse.ArgumentParser(prog="Caron")
@@ -46,7 +47,7 @@ class Main:
             self.viz.run() # visualises self.data frames
         # Phase 2: replace with self.data class buffering
 
-    
+
     #def run_sim_only(self):
     #    self.sim.run_no_viz() # need to define what it does exactly. At this stage, it just fills the data buffer.
 
