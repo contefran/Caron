@@ -3,7 +3,8 @@ import numpy as np
 from matplotlib import colormaps as cm 
 import dearpygui.dearpygui as dpg
 from numba import njit
-
+from data import Data
+from collections import deque
 
 @njit
 def normalize_frame(frame):
@@ -21,22 +22,27 @@ def normalize_frame(frame):
 
 class Visualization:
     """
-    A thin OO wrapper around the existing Caron visualiser.
-
-    For now this class:
-      * Loads 'Simulation.npy'
-      * Sets up DearPyGui with the same controls as before
-      * Uses the same update_frame scheduling (set_frame_callback)
+    Consume frames from a Data buffer and display them with DearPyGui.
+    Phase 1:
+      * We assume that the simulation has already filled the buffer.
+      * We simply pop frames from Data at a rate set by 'fps'.
+    Phase 2:
+      * We feed the buffer with the mock simulation, but at a certain rate
+    Phase 3:
+      * We feed the buffer with a real-time simulation.
     """
 
-    def __init__(self, sim_file: str = "Simulation.npy") -> None:
-        # Load frames exactly as before
-        self.frames: np.ndarray = np.load(sim_file)
-        self.sim_size: int = self.frames.shape[1]
-        print(
-            f"Loaded simulation with {self.frames.shape[0]} "
-            f"frames of size {self.sim_size}x{self.sim_size}"
-        )
+    def __init__(self, data:Data, args) -> None:
+        self.data = data # this is the first buffer, obtained after a few seconds of simulation
+        self.args = args
+        self.frames = self.data.buffer
+        if self.args.no_sim:
+            frames_array = np.load(self.args.sim_file)
+            self.frames = deque(frames_array) 
+        else:
+            self.frames = self.data.buffer  # already a deque, as set in Data
+        self.sim_size: int = self.frames[0].shape[1]
+        print(f"Loaded simulation with {len(self.frames)} frames of size {self.sim_size}x{self.sim_size} as initial buffering.")
 
         # Playback state (were globals before)
         self.running: bool = False

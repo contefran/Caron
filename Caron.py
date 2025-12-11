@@ -15,17 +15,19 @@ class Main:
         )
         self.viz = Visualization(
             data=self.data,
-            fps=self.args.fps,
+            args=self.args,
         )
+
 
 
     @staticmethod
     def parse_args():
         parser = argparse.ArgumentParser(prog="Caron")
-        parser.add_argument("--size",type=int,default=128,help="Linear size of the simulation grid")
-        parser.add_argument("--n_frames",type=int,default=200,help="Number of simulation frames")
+        parser.add_argument("--size",type=int,default=512,help="Linear size of the simulation grid [Default: 512]")
+        parser.add_argument("--n_frames",type=int,default=200,help="Number of simulation frames [Default: 200]")
         parser.add_argument("--viz_fps",type=float,default=100,help="Initial visualisation FPS")
-        parser.add_argument("--no_sim",action="store_true",help="Disable simulation (visualise existing buffer only)")
+        parser.add_argument("--sim_file",type=float,default="./mock_sim.npy",help="Mock simulation file [Default: mock_sim.npy]")
+        parser.add_argument("--no_sim",action="store_true",help="Disable simulation (visualise mock simulation only)")
         parser.add_argument("--no_viz",action="store_true",help="Disable visualisation (run simulation only)")
         return parser.parse_args()
 
@@ -37,18 +39,12 @@ class Main:
 
         if self.args.no_viz:
             self.run_sim_only()
-        elif self.args.no_sim:
-            self.run_viz_only()
         else:
             self.run_all()
 
 
     def run_sim_only(self):
         self.sim.run_no_viz() # need to define what it does exactly
-
-
-    def run_viz_only(self):
-        self.viz.run_no_sim() # I guess self.data would use the existing simulation as a buffer, formatted as a list of frames
 
 
     def run_all(self):
