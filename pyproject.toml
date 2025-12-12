@@ -15,13 +15,14 @@ authors = [
 ]
 dependencies = [
     "numpy",
+    "argparse",
     "matplotlib",
     "dearpygui",
-    "numba",
-    "matplotlib",
-    "jax"
+    "numba"
 ]
 
+[project.optional-dependencies]
+jax = ["jax"]
 
 [tool.setuptools.packages.find]
 include = ["caron*"]

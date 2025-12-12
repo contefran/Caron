@@ -3,7 +3,7 @@ import numpy as np
 from matplotlib import colormaps as cm 
 import dearpygui.dearpygui as dpg
 from numba import njit
-from data import Data
+from caron.data import Data
 
 
 @njit
