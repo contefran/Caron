@@ -3,6 +3,7 @@ import numpy as np
 from matplotlib import colormaps as cm 
 import dearpygui.dearpygui as dpg
 from numba import njit
+from data import Data
 
 
 @njit
@@ -21,31 +22,39 @@ def normalize_frame(frame):
 
 class Visualization:
     """
-    A thin OO wrapper around the existing Caron visualiser.
-
-    For now this class:
-      * Loads 'Simulation.npy'
-      * Sets up DearPyGui with the same controls as before
-      * Uses the same update_frame scheduling (set_frame_callback)
+    Consume frames from a Data buffer and display them with DearPyGui.
+    Phase 1:
+      * We assume that the simulation has already filled the buffer.
+      * We simply pop frames from Data at a rate set by 'fps'.
+    Phase 2:
+      * We feed the buffer with the mock simulation, but at a certain rate
+    Phase 3:
+      * We feed the buffer with a real-time simulation.
     """
 
-    def __init__(self, sim_file: str = "Simulation.npy") -> None:
-        # Load frames exactly as before
-        self.frames: np.ndarray = np.load(sim_file)
-        self.sim_size: int = self.frames.shape[1]
-        print(
-            f"Loaded simulation with {self.frames.shape[0]} "
-            f"frames of size {self.sim_size}x{self.sim_size}"
-        )
+    def __init__(self, data:Data, args) -> None:
+        self.data = data # this is the first buffer, obtained after a few seconds of simulation
+        self.args = args
+        self.frames = self.data.buffer
+        if self.args.no_sim:
+            frames_array = np.load(self.args.sim_file)
+            for frame in frames_array:
+                self.data.push_frame(frame) # fill the buffer with the mock sim. It's a deque
+        self.frames = self.data.buffer  # already a deque, as set in Data
+        if not self.frames:
+            raise RuntimeError("Visualization initialised with an empty buffer.")
 
-        # Playback state (were globals before)
+
+        self.sim_size: int = self.frames[0].shape[1]
+        print(f"Loaded simulation with {len(self.frames)} frames of size {self.sim_size}x{self.sim_size} as initial buffering.")
+
         self.running: bool = False
-        self.speed: int = 10  # interpreted as FPS (slider label says FPS)
+        self.fps: int = self.args.viz_fps
         self.last_update_time: float = time.time()
         self.frame_index: int = 0
 
         # Precompute first frame to initialise the texture
-        frame = self.frames[0]
+        frame = self.frames[0] # still works with deque, I'm already in love
         frame_min = np.min(frame)
         frame_max = np.max(frame)
         frame_norm = (frame - frame_min) / (frame_max - frame_min)
@@ -58,30 +67,26 @@ class Visualization:
             cm['inferno'](np.linspace(0, 1, 256))[:, :3] * 255
         ).astype(np.uint8)
 
-        # DearPyGui bookkeeping
-        self._texture_tag: str = "frame_tag"
-        self._font_tag: str = "big_font"
+        # DearPyGui tags
+        #self._font_tag: str = "big_font"
 
     # Runs
     # ------------------------------------------------------------------
     def run(self) -> None:
-        """
-        Set up DearPyGui and start the visualisation.
-        """
+        """Set up DearPyGui and start the visualisation."""
         dpg.create_context()
 
-        # If you want the font back, uncomment the registry and bind_font below
+        # To get the font back, uncomment the registry and bind_font below
         # with dpg.font_registry():
         #     dpg.add_font("C:/Windows/Fonts/BKANT.TTF", 20, tag=self._font_tag)
 
         with dpg.texture_registry(show=True):
-            # Same call as before, just expanded the ellipsis:
             dpg.add_raw_texture(
                 int(self.sim_size),
                 int(self.sim_size),
-                default_value=self.frame_flattened,
+                default_value=self.frame_flattened.tolist(),
                 format=dpg.mvFormat_Float_rgb,
-                tag=self._texture_tag,
+                tag="frame_tag",
             )
 
         # Window / layout
@@ -101,13 +106,13 @@ class Visualization:
                     dpg.add_slider_int(
                         label="Speed (FPS)",
                         height=40,
-                        default_value=self.speed,
+                        default_value=self.fps,
                         min_value=1,
-                        max_value=60,
+                        max_value=self.fps,
                         callback=_speed_callback,
                         user_data=self,
                     )
-                    dpg.add_image(self._texture_tag)
+                    dpg.add_image("frame_tag")
                 with dpg.group(label="Start&Stop"):
                     dpg.add_button(
                         label="Start",
@@ -132,7 +137,7 @@ class Visualization:
 
         dpg.setup_dearpygui()
 
-        # Kick off the first update, as in the original script
+        # Kick off the first update
         _update_frame(None, None, self)
 
         dpg.show_viewport()
@@ -152,33 +157,35 @@ def _stop_callback(sender, app_data, user_data: Visualization):
 
 def _speed_callback(sender, app_data, user_data: Visualization):
     # app_data is the slider value
-    user_data.speed = int(app_data)
+    user_data.fps = int(app_data)
 
 
 def _update_frame(sender, app_data, user_data: Visualization):
-    """
-    This is almost identical to the original update_frame(),
-    but everything lives on 'user_data' instead of globals.
-    """
+    """ Everything lives on user_data instead of self or globals."""
     current_time = time.time()
 
-    # Same timing condition as before
-    if (user_data.running and (current_time - user_data.last_update_time) >= 1 / user_data.speed) or user_data.frame_index == 0:
+    # Check timing
+    if (user_data.running and (current_time - user_data.last_update_time) >= 1 / user_data.fps) or user_data.frame_index == 0:
+        print(f"time since last update: {current_time - user_data.last_update_time:.3f}s")
         user_data.last_update_time = current_time
 
-        frame = user_data.frames[user_data.frame_index]
-        frame_norm = normalize_frame(frame)
+        # Act on the buffer
+        frame = user_data.data.pop_frame()
+        if frame is None:
+            print("No more frames to visualise, stopping.")
+            user_data.running = False # I guess?
+            return
+        else:
+            frame_norm = normalize_frame(frame)
 
-        # Apply LUT instead of colormap (same optimisation as before)
-        indices = (frame_norm * 255).astype(np.uint8)
-        frame_rgb = user_data.inferno_lut[indices]
-        frame_flattened = frame_rgb.flatten().astype(np.float32) / 255.0
-
-        dpg.set_value(user_data._texture_tag, frame_flattened)
-
-        user_data.frame_index = (user_data.frame_index + 1) % len(user_data.frames)
-
-    # Same scheduling logic: re-register callback a couple of frames ahead
+            # Apply LUT instead of colormap
+            indices = (frame_norm * 255).astype(np.uint8)
+            frame_rgb = user_data.inferno_lut[indices]
+            frame_flattened = frame_rgb.flatten().astype(np.float32) / 255.0
+            dpg.set_value("frame_tag", frame_flattened)
+            user_data.frame_index += 1 # just increment, stop when no more frames
+        
+    # Re-register callback a couple of frames ahead
     with dpg.mutex():
-        target_frame = dpg.get_frame_count() + 2
+        target_frame = dpg.get_frame_count() + 1
         dpg.set_frame_callback(target_frame, _update_frame, user_data=user_data)

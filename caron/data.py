@@ -16,6 +16,7 @@ class Data:
     def pop_frame(self) -> np.ndarray | None:
         """Remove the oldest frame from the buffer (returns None if the buffer is empty)."""
         if not self.buffer:
+            print("Data buffer is empty!") # Need to handle this case properly because it'll always be the case after the simulation is over
             return None
         return self.buffer.popleft()
 
