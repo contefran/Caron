@@ -1,5 +1,5 @@
 # imports
-from collections import deque # ma perche' no
+from collections import deque
 import numpy as np
 
 
