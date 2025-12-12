@@ -49,8 +49,13 @@ class Visualization:
         print(f"Loaded simulation with {len(self.frames)} frames of size {self.sim_size}x{self.sim_size} as initial buffering.")
 
         self.running: bool = False
-        self.fps: int = self.args.viz_fps
-        self.last_update_time: float = time.time()
+        self.fps = float(self.args.viz_fps)
+        self._frame_period = 1.0 / self.fps
+        self._next_due_time = time.perf_counter()  # better clock for intervals
+
+        # For debugging prints only (actual time between updates)
+        self.last_update_time: float = self._next_due_time
+        #self.last_update_time: float = time.time()
         self.frame_index: int = 0
 
         # Precompute first frame to initialise the texture
@@ -106,9 +111,9 @@ class Visualization:
                     dpg.add_slider_int(
                         label="Speed (FPS)",
                         height=40,
-                        default_value=self.fps,
+                        default_value=int(self.fps),
                         min_value=1,
-                        max_value=self.fps,
+                        max_value=int(self.fps),
                         callback=_speed_callback,
                         user_data=self,
                     )
@@ -157,23 +162,39 @@ def _stop_callback(sender, app_data, user_data: Visualization):
 
 def _speed_callback(sender, app_data, user_data: Visualization):
     # app_data is the slider value
-    user_data.fps = int(app_data)
+    new_fps = max(0, int(app_data))  # avoid negatives
+    user_data.fps = float(new_fps)
+    user_data._frame_period = 1.0 / user_data.fps
 
 
 def _update_frame(sender, app_data, user_data: Visualization):
     """ Everything lives on user_data instead of self or globals."""
-    current_time = time.time()
 
     # Check timing
-    if (user_data.running and (current_time - user_data.last_update_time) >= 1 / user_data.fps) or user_data.frame_index == 0:
-        print(f"time since last update: {current_time - user_data.last_update_time:.3f}s")
-        user_data.last_update_time = current_time
+    now = time.perf_counter()
+
+    do_update = False # the update should not happen here I think -- but can be tried differently
+
+    if user_data.frame_index == 0: # First frame: display immediately and initialise the schedule.
+        do_update = True
+        user_data._next_due_time = now + user_data._frame_period
+
+    elif user_data.running and now >= user_data._next_due_time: # which means we're at or past the scheduled time
+        do_update = True
+        user_data._next_due_time += user_data._frame_period # advance by ideal frame period rather than now-last to reduce drift
+        # optional safety: if we're badly behind, catch up
+        if now > user_data._next_due_time + user_data._frame_period:
+            user_data._next_due_time = now + user_data._frame_period
+
+    if do_update:
+        print(f"time since last update: {now - user_data.last_update_time:.3f}s") # the real time between updates
+        user_data.last_update_time = now
 
         # Act on the buffer
-        frame = user_data.data.pop_frame()
+        frame = user_data.data.pop_frame() # frame consumed
         if frame is None:
             print("No more frames to visualise, stopping.")
-            user_data.running = False # I guess?
+            user_data.running = False # I guess? So the GUI is not closed
             return
         else:
             frame_norm = normalize_frame(frame)
@@ -185,7 +206,7 @@ def _update_frame(sender, app_data, user_data: Visualization):
             dpg.set_value("frame_tag", frame_flattened)
             user_data.frame_index += 1 # just increment, stop when no more frames
         
-    # Re-register callback a couple of frames ahead
+    # Re-register callback one (or two) dpg frame ahead
     with dpg.mutex():
-        target_frame = dpg.get_frame_count() + 1
+        target_frame = dpg.get_frame_count() + 1 # +2
         dpg.set_frame_callback(target_frame, _update_frame, user_data=user_data)
