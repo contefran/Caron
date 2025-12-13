@@ -1,6 +1,6 @@
 import time
 import numpy as np
-from matplotlib import colormaps as cm 
+from matplotlib import colormaps as cm
 import dearpygui.dearpygui as dpg
 from numba import njit
 from caron.data import Data
@@ -55,7 +55,6 @@ class Visualization:
 
         # For debugging prints only (actual time between updates)
         self.last_update_time: float = self._next_due_time
-        #self.last_update_time: float = time.time()
         self.frame_index: int = 0
 
         # Calibration state
@@ -107,8 +106,8 @@ class Visualization:
         # Window / layout
         with dpg.window(
             label="Jet Inspector",
-            width=int(self.sim_size * 1.1),
-            height=int(self.sim_size),
+            width=int(self.sim_size * 1.3),
+            height=int(self.sim_size* 1.15),
             no_close=True,
             no_move=True,
             no_resize=False,
@@ -116,39 +115,41 @@ class Visualization:
             # If using the font:
             # dpg.bind_font(self._font_tag)
 
-            with dpg.group(label="Visualizator", horizontal=True):
-                with dpg.group(label="Map and slider"):
+            with dpg.group(label="Visualizator"): # the big visualization window
+                with dpg.group(label="Slider"): # above there is the slider
                     dpg.add_slider_int(
                         label="Speed (FPS)",
                         tag="Caron FPS Slider",
-                        height=40,
+                        width=int(self.sim_size),
+                        height=self.sim_size//10,
                         default_value=int(self.fps),
                         min_value=1,
                         max_value=int(self.fps),
-                        callback=_speed_callback,
+                        callback=_fps_callback,
                         user_data=self,
                     )
-                    dpg.add_image("frame_tag")
-                with dpg.group(label="Start&Stop"):
-                    dpg.add_button(
-                        label="Start",
-                        callback=_start_callback,
-                        user_data=self,
-                        width=80,
-                        height=200,
-                    )
-                    dpg.add_button(
-                        label="Stop",
-                        callback=_stop_callback,
-                        user_data=self,
-                        width=80,
-                        height=200,
-                    )
+                with dpg.group(label="Map & Keys", horizontal=True): # below there is the image and the buttons
+                    dpg.add_image("frame_tag") # the image on the left
+                    with dpg.group(label="Start&Stop"): # the buttons on the right
+                        dpg.add_button( # the start button above
+                            label="Start",
+                            callback=_start_callback,
+                            user_data=self,
+                            width=int(self.sim_size*0.1),
+                            height=int(self.sim_size*0.5),
+                        )
+                        dpg.add_button( # the stop button below
+                            label="Stop",
+                            callback=_stop_callback,
+                            user_data=self,
+                            width=int(self.sim_size*0.1),
+                            height=int(self.sim_size*0.5),
+                        )
 
         dpg.create_viewport(
             title="Our lovely Caron",
-            width=int(self.sim_size * 1.1),
-            height=int(self.sim_size),
+            width=int(self.sim_size * 1.3),
+            height=int(self.sim_size* 1.15),
         )
 
         dpg.setup_dearpygui()
@@ -184,7 +185,7 @@ def _stop_callback(sender, app_data, user_data: Visualization):
         user_data.calib_active_start = None
 
 
-def _speed_callback(sender, app_data, user_data: Visualization):
+def _fps_callback(sender, app_data, user_data: Visualization):
     # app_data is the slider value
     new_fps = max(0, int(app_data))  # avoid negatives
     user_data.fps = float(new_fps)
