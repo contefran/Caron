@@ -106,8 +106,8 @@ class Visualization:
         # Window / layout
         with dpg.window(
             label="Jet Inspector",
-            width=int(self.sim_size * 1.3),
-            height=int(self.sim_size* 1.15),
+            width=int(self.sim_size * 2.6),
+            height=int(self.sim_size* 2.3),
             no_close=True,
             no_move=True,
             no_resize=False,
@@ -120,8 +120,8 @@ class Visualization:
                     dpg.add_slider_int(
                         label="Speed (FPS)",
                         tag="Caron FPS Slider",
-                        width=int(self.sim_size),
-                        height=self.sim_size//10,
+                        width=int(self.sim_size*2),
+                        height=int(self.sim_size*1),
                         default_value=int(self.fps),
                         min_value=1,
                         max_value=int(self.fps),
@@ -129,27 +129,27 @@ class Visualization:
                         user_data=self,
                     )
                 with dpg.group(label="Map & Keys", horizontal=True): # below there is the image and the buttons
-                    dpg.add_image("frame_tag") # the image on the left
+                    dpg.add_image("frame_tag", width = self.sim_size *2, height= self.sim_size *2) # the image on the left
                     with dpg.group(label="Start&Stop"): # the buttons on the right
                         dpg.add_button( # the start button above
                             label="Start",
                             callback=_start_callback,
                             user_data=self,
                             width=int(self.sim_size*0.1),
-                            height=int(self.sim_size*0.5),
+                            height=int(self.sim_size*0.997),
                         )
                         dpg.add_button( # the stop button below
                             label="Stop",
                             callback=_stop_callback,
                             user_data=self,
                             width=int(self.sim_size*0.1),
-                            height=int(self.sim_size*0.5),
+                            height=int(self.sim_size*0.997),
                         )
 
         dpg.create_viewport(
             title="Our lovely Caron",
-            width=int(self.sim_size * 1.3),
-            height=int(self.sim_size* 1.15),
+            width=int(self.sim_size * 2.6),
+            height=int(self.sim_size* 2.3),
         )
 
         dpg.setup_dearpygui()
