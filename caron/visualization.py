@@ -44,12 +44,12 @@ class Visualization:
         if not self.frames:
             raise RuntimeError("Visualization initialised with an empty buffer.")
 
-
         self.sim_size: int = self.frames[0].shape[1]
         print(f"Loaded simulation with {len(self.frames)} frames of size {self.sim_size}x{self.sim_size} as initial buffering.")
 
         self.running: bool = False
         self.fps = float(self.args.viz_fps)
+        self.max_viz_fps: float = self.fps  # after calibration will be changed to the actual max FPS
         self._frame_period = 1.0 / self.fps
         self._next_due_time = time.perf_counter()  # better clock for intervals
 
@@ -57,6 +57,16 @@ class Visualization:
         self.last_update_time: float = self._next_due_time
         #self.last_update_time: float = time.time()
         self.frame_index: int = 0
+
+        # Calibration state
+        self.calibrated: bool = False # becomes True after calibration
+        self.calibrating: bool = False # True while we are in calibration mode
+        self.calib_start_time: float | None = None
+        self.calib_active_start: float | None = None  # when the current running segment began
+        self.calib_active_time: float = 0.0 # sum of active time during calibration
+        self.calib_frame_count: int = 0 # number of frames displayed during calibration
+        self.calib_duration: float = float(self.args.calib_time)
+        self.calib_frames: float = float(self.args.calib_frames)
 
         # Precompute first frame to initialise the texture
         frame = self.frames[0] # still works with deque, I'm already in love
@@ -110,6 +120,7 @@ class Visualization:
                 with dpg.group(label="Map and slider"):
                     dpg.add_slider_int(
                         label="Speed (FPS)",
+                        tag="Caron FPS Slider",
                         height=40,
                         default_value=int(self.fps),
                         min_value=1,
@@ -154,10 +165,23 @@ class Visualization:
 # ----------------------------------------------------------------------
 def _start_callback(sender, app_data, user_data: Visualization):
     user_data.running = True
+    now = time.perf_counter()
+    if not user_data.calibrated: # could be the first start, or a restart after stopping during calibration
+        user_data.calibrating = True # enter calibration mode
+        if user_data.calib_active_start is None:
+            user_data.calib_active_start = now
+    else:
+        # Normal mode: align schedule so next update can happen promptly
+        user_data._next_due_time = now
 
 
 def _stop_callback(sender, app_data, user_data: Visualization):
     user_data.running = False
+    now = time.perf_counter()
+    # add this segment's duration to the total active time.
+    if user_data.calibrating and user_data.calib_active_start is not None: # meaning it was during calibration
+        user_data.calib_active_time += now - user_data.calib_active_start # add to active time the time between start and stop
+        user_data.calib_active_start = None
 
 
 def _speed_callback(sender, app_data, user_data: Visualization):
@@ -168,25 +192,35 @@ def _speed_callback(sender, app_data, user_data: Visualization):
 
 
 def _update_frame(sender, app_data, user_data: Visualization):
-    """ Everything lives on user_data instead of self or globals."""
-
-    # Check timing
+    """
+    Frame callback.
+    Modes:
+      1) Calibration (user_data.calibrating == True):
+         - While running, display frames as fast as possible (one per callback), pop from Data buffer, and measure max visualisation rate.
+         - Stop/Start pauses/resumes calibration timing (only active time counts).
+      2) Normal (user_data.calibrating == False):
+         - While running, display frames at requested FPS using a scheduled next_due_time (average matches requested FPS).
+    """
     now = time.perf_counter()
 
-    do_update = False # the update should not happen here I think -- but can be tried differently
+    do_update = False
 
-    if user_data.frame_index == 0: # First frame: display immediately and initialise the schedule.
-        do_update = True
-        user_data._next_due_time = now + user_data._frame_period
-
-    elif user_data.running and now >= user_data._next_due_time: # which means we're at or past the scheduled time
-        do_update = True
-        user_data._next_due_time += user_data._frame_period # advance by ideal frame period rather than now-last to reduce drift
-        # optional safety: if we're badly behind, catch up
-        if now > user_data._next_due_time + user_data._frame_period:
+    if user_data.calibrating: # During calibration, update on every callback while running
+        if user_data.running:
+            do_update = True
+    else: # Normal mode: scheduled updates
+        if user_data.frame_index == 0:
+            do_update = True
             user_data._next_due_time = now + user_data._frame_period
+        elif user_data.running and now >= user_data._next_due_time: # which means we're at or past the scheduled time
+            do_update = True
+            user_data._next_due_time += user_data._frame_period # advance by ideal frame period rather than now-last to reduce drift
+            # optional safety: if we're badly behind, catch up
+            if now > user_data._next_due_time + user_data._frame_period:
+                user_data._next_due_time = now + user_data._frame_period
 
     if do_update:
+        # Debug: time between displayed frames
         print(f"time since last update: {now - user_data.last_update_time:.3f}s") # the real time between updates
         user_data.last_update_time = now
 
@@ -198,14 +232,54 @@ def _update_frame(sender, app_data, user_data: Visualization):
             return
         else:
             frame_norm = normalize_frame(frame)
-
             # Apply LUT instead of colormap
             indices = (frame_norm * 255).astype(np.uint8)
             frame_rgb = user_data.inferno_lut[indices]
             frame_flattened = frame_rgb.flatten().astype(np.float32) / 255.0
             dpg.set_value("frame_tag", frame_flattened)
-            user_data.frame_index += 1 # just increment, stop when no more frames
-        
+            user_data.frame_index += 1
+
+            # Calibration
+            if user_data.calibrating:
+                # Ensure active segment is marked if running
+                if user_data.calib_active_start is None:
+                    user_data.calib_active_start = now
+
+                # Count frames (only frames actually displayed)
+                user_data.calib_frame_count += 1
+
+                # Compute active time (exclude idle time)
+                active_time = user_data.calib_active_time
+                if user_data.calib_active_start is not None:
+                    active_time += now - user_data.calib_active_start
+
+                if active_time >= user_data.calib_duration and user_data.calib_frame_count >= user_data.calib_frames:
+                    measured_fps = user_data.calib_frame_count / active_time
+                    user_data.max_viz_fps = measured_fps
+
+                    user_data.calibrated = True
+                    user_data.calibrating = False
+
+                    # Finalise calibration timing state
+                    user_data.calib_active_time = 0.0
+                    user_data.calib_active_start = None
+
+                    # Set normal-mode FPS to measured max
+                    user_data.fps = measured_fps
+                    user_data._frame_period = 1.0 / user_data.fps
+                    user_data._next_due_time = now + user_data._frame_period
+
+                    max_slider = max(1, int(measured_fps))
+                    print(f"Calibration complete: max viz FPS ≈ {measured_fps:.2f}")
+
+                    # Resize slider to [1, measured_max] and set it to max
+                    dpg.configure_item(
+                        "Caron FPS Slider",
+                        min_value=1,
+                        max_value=max_slider,
+                        default_value=max_slider,
+                    )
+
     # Re-register callback one (or two) dpg frame ahead
     with dpg.mutex():
         target_frame = dpg.get_frame_count() + 1 # +2
