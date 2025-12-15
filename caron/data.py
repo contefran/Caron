@@ -6,8 +6,10 @@ import numpy as np
 class Data:
     """Shared buffer for frames, and handler for FPS control."""
 
-    def __init__(self, maxlen=None):
+    def __init__(self, buffer_safe_min, maxlen=None, buffer_safe_max=500):
         self.buffer = deque(maxlen=maxlen)
+        self.buffer_safe_min = buffer_safe_min
+        self.buffer_safe_max = buffer_safe_max
 
     def push_frame(self, frame: np.ndarray) -> None:
         """Add a new 2D frame to the buffer."""
@@ -16,7 +18,7 @@ class Data:
     def pop_frame(self) -> np.ndarray | None:
         """Remove the oldest frame from the buffer (returns None if the buffer is empty)."""
         if not self.buffer:
-            print("Data buffer is empty!") # Need to handle this case properly because it'll always be the case after the simulation is over
+            print("Data buffer is empty!")
             return None
         return self.buffer.popleft()
 

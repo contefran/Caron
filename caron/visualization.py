@@ -24,14 +24,17 @@ class Visualization:
     """
     Consume frames from a Data buffer and display them with DearPyGui.
     Phase 1:
-      * We assume that the simulation has already filled the buffer.
-      * We simply pop frames from Data at a rate set by 'fps'.
+      *[V] We assume that the simulation has already filled the buffer.
+      *[V] We simply pop frames from Data at a rate set by 'fps'.
     Phase 2:
       * We feed the buffer with the mock simulation, but at a certain rate
     Phase 3:
       * We feed the buffer with a real-time simulation.
     """
 
+
+    # Initialization
+    # ------------------------------------------------------------------
     def __init__(self, data:Data, args) -> None:
         self.data = data # this is the first buffer, obtained after a few seconds of simulation
         self.args = args
@@ -40,12 +43,10 @@ class Visualization:
             frames_array = np.load(self.args.sim_file)
             for frame in frames_array:
                 self.data.push_frame(frame) # fill the buffer with the mock sim. It's a deque
-        self.frames = self.data.buffer  # already a deque, as set in Data
-        if not self.frames:
-            raise RuntimeError("Visualization initialised with an empty buffer.")
 
-        self.sim_size: int = self.frames[0].shape[1]
-        print(f"Loaded simulation with {len(self.frames)} frames of size {self.sim_size}x{self.sim_size} as initial buffering.")
+        self.sim_size = self.args.sim_size
+        if self.args.no_sim:
+            self.sim_size: int = self.frames[0].shape[1]
 
         self.running: bool = False
         self.fps = float(self.args.viz_fps)
@@ -67,6 +68,21 @@ class Visualization:
         self.calib_duration: float = float(self.args.calib_time)
         self.calib_frames: float = float(self.args.calib_frames)
 
+        # DearPyGui tags
+        #self._font_tag: str = "big_font"
+
+
+    # Runs
+    # ------------------------------------------------------------------
+    def run(self) -> None:
+        """Check the buffer, set up DearPyGui and start the visualisation."""
+
+        # Call the buffer
+        self.frames = self.data.buffer  # already a deque, as set in Data. Here it should be already populated by the full sim (no_sim) or by the injection (fake or not)
+        if not self.frames: # and it would be very weird
+            raise RuntimeError("[Viz] Visualization initialised with an empty buffer.")
+        print(f"[Viz] Loaded a simulation of size {self.sim_size}x{self.sim_size} with {len(self.frames)} frames as initial buffering.")
+
         # Precompute first frame to initialise the texture
         frame = self.frames[0] # still works with deque, I'm already in love
         frame_min = np.min(frame)
@@ -76,18 +92,10 @@ class Visualization:
         frame_rgb = frame_rgb.astype(np.float32) / np.max(frame_rgb)
         self.frame_flattened: np.ndarray = frame_rgb.flatten()
 
-        # LUT for inferno colormap (same as before)
-        self.inferno_lut: np.ndarray = (
-            cm['inferno'](np.linspace(0, 1, 256))[:, :3] * 255
-        ).astype(np.uint8)
+        # LUT for inferno colormap
+        self.inferno_lut: np.ndarray = (cm['inferno'](np.linspace(0, 1, 256))[:, :3] * 255).astype(np.uint8)
 
-        # DearPyGui tags
-        #self._font_tag: str = "big_font"
-
-    # Runs
-    # ------------------------------------------------------------------
-    def run(self) -> None:
-        """Set up DearPyGui and start the visualisation."""
+        # DearPyGui setup
         dpg.create_context()
 
         # To get the font back, uncomment the registry and bind_font below
@@ -222,14 +230,14 @@ def _update_frame(sender, app_data, user_data: Visualization):
 
     if do_update:
         # Debug: time between displayed frames
-        print(f"time since last update: {now - user_data.last_update_time:.3f}s") # the real time between updates
+        #print(f"time since last update: {now - user_data.last_update_time:.3f}s") # the real time between updates
         user_data.last_update_time = now
 
         # Act on the buffer
         frame = user_data.data.pop_frame() # frame consumed
         if frame is None:
-            print("No more frames to visualise, stopping.")
-            user_data.running = False # I guess? So the GUI is not closed
+            print("[Viz] No more frames to visualise, stopping.")
+            user_data.running = False # I guess? So the GUI is not closed automatically at the end
             return
         else:
             frame_norm = normalize_frame(frame)
@@ -271,7 +279,7 @@ def _update_frame(sender, app_data, user_data: Visualization):
                     user_data._next_due_time = now + user_data._frame_period
 
                     max_slider = max(1, int(measured_fps))
-                    print(f"Calibration complete: max viz FPS ≈ {measured_fps:.2f}")
+                    print(f"[Viz] Calibration complete: max viz FPS ≈ {measured_fps:.2f}")
 
                     # Resize slider to [1, measured_max] and set it to max
                     dpg.configure_item(
