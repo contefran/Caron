@@ -230,7 +230,7 @@ def _update_frame(sender, app_data, user_data: Visualization):
 
     if do_update:
         # Debug: time between displayed frames
-        #print(f"time since last update: {now - user_data.last_update_time:.3f}s") # the real time between updates
+        #print(f"[Viz] time since last update: {now - user_data.last_update_time:.3f}s") # the real time between updates
         user_data.last_update_time = now
 
         # Act on the buffer

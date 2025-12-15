@@ -32,7 +32,7 @@ class Main:
         parser.add_argument("--no_sim",action="store_true",help="Disable simulation (visualise mock simulation only)")
         parser.add_argument("--no_viz",action="store_true",help="Disable visualisation (run simulation only)")
         parser.add_argument("--fake_injection",action="store_true",help="Inject the mock simulation at a fixed fps (does not work when --no_sim is invoked)")
-        parser.add_argument("--fake_sim_fps",type=int,default=50,help="Fake simulation injection fps, when --fake_injection is invoked [Default: 50Hz]")
+        parser.add_argument("--fake_sim_fps",type=int,default=60,help="Fake simulation injection fps, when --fake_injection is invoked [Default: 60Hz]")
         
         return parser.parse_args()
 
