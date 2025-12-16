@@ -1,15 +1,20 @@
-# imports
+# data.py
+
+from dataclasses import dataclass
 from collections import deque
 import numpy as np
 
 
+@dataclass
 class Data:
     """Shared buffer for frames, and handler for FPS control."""
 
-    def __init__(self, buffer_safe_min, maxlen=None, buffer_safe_max=500):
-        self.buffer = deque(maxlen=maxlen)
-        self.buffer_safe_min = buffer_safe_min
-        self.buffer_safe_max = buffer_safe_max
+    buffer_safe_min: int
+    buffer_safe_max: int = 500
+    maxlen = None
+
+    def __post_init__(self) -> None:
+        self.buffer = deque(maxlen=self.maxlen)
 
     def push_frame(self, frame: np.ndarray) -> None:
         """Add a new 2D frame to the buffer."""
