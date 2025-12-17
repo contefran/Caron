@@ -6,19 +6,17 @@ from caron.data import Data
 from caron.simulation import Simulation
 from caron.visualization import Visualization
 
+
 class Main:
+
+    
+    # Initialization
+    # ------------------------------------------------------------------
     def __init__(self):
         self.args = self.parse_args()
-        self.data = Data(buffer_safe_min=self.args.calib_frames, buffer_safe_max=500)
-        self.sim = Simulation(
-            data=self.data,
-            args=self.args,
-        )
-        self.viz = Visualization(
-            data=self.data,
-            args=self.args,
-        )
-
+        self.data = Data(buffer_safe_min=self.args.calib_frames, buffer_safe_max=500, viz_target_fps=self.args.viz_fps)
+        self.sim = Simulation(data=self.data,args=self.args)
+        self.viz = Visualization(data=self.data,args=self.args)
 
     @staticmethod
     def parse_args():
@@ -33,13 +31,15 @@ class Main:
         parser.add_argument("--no_viz",action="store_true",help="Disable visualisation (run simulation only)")
         parser.add_argument("--fake_injection",action="store_true",help="Inject the mock simulation at a fixed fps (does not work when --no_sim is invoked)")
         parser.add_argument("--fake_sim_fps",type=int,default=60,help="Fake simulation injection fps, when --fake_injection is invoked [Default: 60Hz]")
-        
+        parser.add_argument("--ctrl_dt", type=float, default=0.2,help="Control loop tick interval in seconds [Default: 0.2s]")
         return parser.parse_args()
 
 
+    # Runs
+    # ----------------------------------------------------------------------
     def run(self):
         if self.args.no_sim and self.args.no_viz:
-            print("Nothing to do: both --no_sim and --no_viz are set.")
+            print("[Main] Nothing to do: both --no_sim and --no_viz are set.")
             return
 
         #if self.args.no_viz:
@@ -59,16 +59,44 @@ class Main:
                 print("[Main] Running mock simulation injection + visualization.")
                 sim_thread = threading.Thread(target=self.sim.run_mock, daemon=True)
                 sim_thread.start()
+
+                # Main controller of the data buffer balance between sim and viz
+                ctrl_thread = threading.Thread(target=self._control_loop,args=(self.args.ctrl_dt,),daemon=True)
+                ctrl_thread.start()
+
                 # Wait until buffer reaches safe_min before starting viz
                 while len(self.data.buffer) < self.data.buffer_safe_min:
                     time.sleep(0.01)
                 print(f"[Main] Buffer reached size {len(self.data)}: starting visualization.")
-
-                self.viz.run() # now stat the visualization
+                self.viz.run() # now start the visualization
             else:
                 raise NotImplementedError("[Main] Main.run: real simulation + visualization not implemented yet.")
 
 
+    # Thread to monitor the buffer
+    # ----------------------------------------------------------------------
+    def _control_loop(self, dt) -> None:
+        """Periodically read measured SR/VR and ask Data to adjust commands."""
+        print(f"[Main] Control loop started")
+        while True and not self.viz.finished:
+            time.sleep(dt) # What's a good monitoring rate?
+            if self.viz.calibrated: # start monitoring only after calibration
+                sim_rate = float(self.sim.get_measured_fps())
+                viz_rate = float(self.viz.get_measured_fps())
+                self.data.balance_rates(sim_rate, viz_rate)
+                print(f"[Main] Simulation FPS:{sim_rate} | Visualization FPS: {viz_rate} | buffer={len(self.data)}")
+
+
 if __name__ == "__main__":
     Main().run()
-    
+
+
+
+
+"""Todo:
+- What happens if the buffer is empty? The visualizer should wait for new frames.
+- Colormaps? Can they be defined also for log scale?
+- max_viz_fps obtained after calibration should override max_fps_viz in Data.
+- the average fps calculation reset should happen also when manually changing the slider
+- Implement verbose mode
+"""

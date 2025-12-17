@@ -4,6 +4,7 @@ from matplotlib import colormaps as cm
 import dearpygui.dearpygui as dpg
 from numba import njit
 from caron.data import Data
+import threading
 
 
 @njit
@@ -48,6 +49,7 @@ class Visualization:
         if self.args.no_sim:
             self.sim_size: int = self.frames[0].shape[1]
 
+        self.finished: bool = False
         self.running: bool = False
         self.fps = float(self.args.viz_fps)
         self.max_viz_fps: float = self.fps  # after calibration will be changed to the actual max FPS
@@ -68,11 +70,19 @@ class Visualization:
         self.calib_duration: float = float(self.args.calib_time)
         self.calib_frames: float = float(self.args.calib_frames)
 
+        # Rate measurement
+        self._rate_lock = threading.Lock()
+        self._rate_active_start: float | None = None  # start of current running segment
+        self._rate_active_time: float = 0.0 # accumulated running time (excludes pauses)
+        self._rate_frames: int = 0 # frames actually displayed since last reset
+        self._avg_fps: float = 0.0 # current average visualization fps
+        self._seen_viz_cmd_version: int = 0 # in underflow, the bump changes this value and resets the avg measurement
+
         # DearPyGui tags
         #self._font_tag: str = "big_font"
 
 
-    # Runs
+    # Run
     # ------------------------------------------------------------------
     def run(self) -> None:
         """Check the buffer, set up DearPyGui and start the visualisation."""
@@ -169,36 +179,103 @@ class Visualization:
         dpg.start_dearpygui()
         dpg.destroy_context()
 
+    # Command getters (called by Data)
+    # ------------------------------------------------------------------
+    def get_measured_fps(self) -> float:
+        """Return average FPS over active display time."""
+        with self._rate_lock:
+            return self._avg_fps
+
+    
+    # Internal functions to calculate the average fps
+    # ------------------------------------------------------------------
+    def _reset_rate_measurement(self, now: float) -> None:
+        """Reset the averaging window (required when FPS changes forcibly)."""
+        with self._rate_lock:
+            self._rate_active_time = 0.0
+            self._rate_frames = 0
+            self._avg_fps = 0.0
+            self._rate_active_start = None # If we are running, start a fresh active segment now
+
+    def _rate_on_start(self, now: float) -> None:
+        """Called when Start pressed: begin (or resume) active segment."""
+        with self._rate_lock:
+            if self._rate_active_start is None:
+                self._rate_active_start = now
+
+    def _rate_on_stop(self, now: float) -> None:
+        """Called when Stop pressed: close active segment (exclude idle time)."""
+        with self._rate_lock:
+            if self._rate_active_start is not None:
+                self._rate_active_time += now - self._rate_active_start
+                self._rate_active_start = None
+
+    def _rate_tick_frame_displayed(self, now: float) -> None:
+        """Called only when a frame is actually displayed."""
+        with self._rate_lock:
+            if self._rate_active_start is None:
+                self._rate_active_start = now # If we somehow display while active_start isn't set, start it.
+            self._rate_frames += 1 
+            active_time = self._rate_active_time + (now - self._rate_active_start) # does not include down time
+            if active_time > 0 and self._rate_frames >= 2:
+                self._avg_fps = (self._rate_frames-1) / active_time
+
+
+    # Internal functions to apply the new average fps
+    # ------------------------------------------------------------------
+    def _sync_viz_command_from_data(self, now: float) -> None:
+        """If Data issued a new viz command, apply it and reset the avg_fps calculation window."""
+        try: # Just in case data wants to change something during the iteration
+            ver = self.data.get_viz_cmd_version()
+        except Exception:
+            ver = getattr(self.data, "viz_cmd_version", 0)
+
+        if ver == self._seen_viz_cmd_version: # no change happened
+            return
+
+        self._seen_viz_cmd_version = ver # change obviously happened
+        target = self.data.get_viz_target_fps() # get the needed fps as calculated by Data
+        self._apply_new_fps(target, now, update_slider=True, reset_measurement=True)
+
+    def _apply_new_fps(self, new_fps: float, now: float, *, update_slider: bool, reset_measurement: bool) -> None:
+        """Apply a new FPS to the scheduler (used by both Data and slider)."""
+        fps = max(1.0, float(new_fps))
+        self.fps = fps
+        self._frame_period = 1.0 / self.fps # our new target period
+        self._next_due_time = now + self._frame_period # align schedule
+        if reset_measurement:
+            self._reset_rate_measurement(now)
+
 
 # Callbacks (operate via user_data)
 # ----------------------------------------------------------------------
 def _start_callback(sender, app_data, user_data: Visualization):
     user_data.running = True
     now = time.perf_counter()
+
     if not user_data.calibrated: # could be the first start, or a restart after stopping during calibration
         user_data.calibrating = True # enter calibration mode
         if user_data.calib_active_start is None:
             user_data.calib_active_start = now
     else:
-        # Normal mode: align schedule so next update can happen promptly
-        user_data._next_due_time = now
-
+        user_data._rate_on_start(now) # start/resume the avg fps measurement. It should be done after calibration
+        user_data._next_due_time = now # Normal mode: align schedule so next update can happen promptly
 
 def _stop_callback(sender, app_data, user_data: Visualization):
     user_data.running = False
     now = time.perf_counter()
-    # add this segment's duration to the total active time.
+    user_data._rate_on_stop(now) #stop the avg fps measurement for now
     if user_data.calibrating and user_data.calib_active_start is not None: # meaning it was during calibration
-        user_data.calib_active_time += now - user_data.calib_active_start # add to active time the time between start and stop
+        user_data.calib_active_time += now - user_data.calib_active_start # add the interval between start and stop to the active time
         user_data.calib_active_start = None
 
-
 def _fps_callback(sender, app_data, user_data: Visualization):
-    # app_data is the slider value
-    new_fps = max(0, int(app_data))  # avoid negatives
-    user_data.fps = float(new_fps)
-    user_data._frame_period = 1.0 / user_data.fps
-
+    """ app_data is the slider value """
+    now = time.perf_counter()
+    user_data.fps = float(max(1, int(app_data))) # avoid negatives
+    user_data._frame_period = 1.0 / user_data.fps # new frame visualization period
+    user_data._next_due_time = now + user_data._frame_period  # re-align schedule
+    user_data._reset_rate_measurement(now)
 
 def _update_frame(sender, app_data, user_data: Visualization):
     """
@@ -211,6 +288,7 @@ def _update_frame(sender, app_data, user_data: Visualization):
          - While running, display frames at requested FPS using a scheduled next_due_time (average matches requested FPS).
     """
     now = time.perf_counter()
+    user_data._sync_viz_command_from_data(now)
 
     do_update = False
 
@@ -238,6 +316,7 @@ def _update_frame(sender, app_data, user_data: Visualization):
         if frame is None:
             print("[Viz] No more frames to visualise, stopping.")
             user_data.running = False # I guess? So the GUI is not closed automatically at the end
+            user_data.finished = True
             return
         else:
             frame_norm = normalize_frame(frame)
@@ -247,6 +326,11 @@ def _update_frame(sender, app_data, user_data: Visualization):
             frame_flattened = frame_rgb.flatten().astype(np.float32) / 255.0
             dpg.set_value("frame_tag", frame_flattened)
             user_data.frame_index += 1
+
+            t_display = time.perf_counter()
+
+            if user_data.running and not user_data.calibrating: # running only after the calibration
+                user_data._rate_tick_frame_displayed(now)
 
             # Calibration
             if user_data.calibrating:
@@ -291,5 +375,5 @@ def _update_frame(sender, app_data, user_data: Visualization):
 
     # Re-register callback one (or two) dpg frame ahead
     with dpg.mutex():
-        target_frame = dpg.get_frame_count() + 1 # +2
+        target_frame = dpg.get_frame_count() + 1 # +2 halves the viz_fps
         dpg.set_frame_callback(target_frame, _update_frame, user_data=user_data)

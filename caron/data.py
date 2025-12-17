@@ -1,33 +1,157 @@
 from dataclasses import dataclass
 from collections import deque
 import numpy as np
+import threading
 
 
 @dataclass
 class Data:
     """Shared buffer for frames, and handler for FPS control."""
 
+    # Initialization
+    # ------------------------------------------------------------------
     buffer_safe_min: int
-    buffer_safe_max: int = 500
+    buffer_safe_max: int
     maxlen = None
-
+    viz_target_fps: float # current target fps for the visualizer
+    min_viz_fps: float = 1.0 # minimum allowed viz fps during balancing
+    max_viz_fps: float = 60.0 # maximum allowed viz fps during balancing, in the beginning. It is updated later by the visualizer after calibration (also setting the slider maximum)
+    viz_margin:float = 5.0 # [frames] margin before pausing/resuming the simulation
+    viz_margin_fps: float = 5.0  # keep viz slightly slower than sim when starving
+    pillow:int = 5 # [frames] thin boundary region to avoid rapid pause/resume cycles
+    viz_cmd_version: int = 0 # becomes 1 when fps changes
+    sim_cmd_version: int = 0
+    sim_paused: bool = False
+    sim_finished: bool=False
 
     def __post_init__(self) -> None:
         self.buffer = deque(maxlen=self.maxlen)
+        self.lock = threading.Lock() # to protect buffer access
+        self.cond = threading.Condition(self.lock) # to notify when new frames are available
 
 
+    # Functions that act on the buffer
+    # ------------------------------------------------------------------
     def push_frame(self, frame: np.ndarray) -> None:
         """Add a new 2D frame to the buffer."""
-        self.buffer.append(frame)
-
+        with self.cond:  # uses same lock + allows notify
+            self.buffer.append(frame) # well, yeah
+            self._apply_safe_control_sim() # Apply control logic based on new buffer size
+            self.cond.notify_all() # notify waiting visualizer threads (just in case sim is not paused)
 
     def pop_frame(self) -> np.ndarray | None:
         """Remove the oldest frame from the buffer (returns None if the buffer is empty)."""
-        if not self.buffer:
-            print("Data buffer is empty!")
-            return None
-        return self.buffer.popleft()
+        with self.cond:
+            if not self.buffer:
+                print("[Data] Buffer empty.")
+                return None
+            frame = self.buffer.popleft()
+            self.cond.notify_all()
+            return frame
+        
 
+    # Control logic
+    # ------------------------------------------------------------------
+    def _apply_safe_control_sim(self) -> None:
+        """Control based purely on buffer size and measured rates."""
+        n = len(self.buffer)
+        # Buffer overflow: sim too fast, pause it
+        if n > self.buffer_safe_max:
+            self.sim_paused = True
+        elif n < (self.buffer_safe_max - self.pillow):
+            self.sim_paused = False
+
+    def wait_if_sim_paused(self, timeout: float = 0.1) -> None:
+        with self.cond:
+            while self.sim_paused:
+                self.cond.wait(timeout=timeout)
+
+
+    # Control function
+    # ------------------------------------------------------------------
+    def balance_rates(self, sim_rate: float, viz_rate: float) -> None:
+        """
+        Controller clock.
+
+        Inputs:
+          sim_rate: measured simulation push rate (Hz)
+          viz_rate: measured visualization pop/render rate (Hz)
+
+        Outputs (commands):
+          - adjusts self.viz_target_fps
+          - pauses/unpauses simulation via self.sim_paused
+
+        IMPORTANT:
+          - Simulation/Visualization should reset their measurement windows when they detect a command version bump (viz_cmd_version / sim_cmd_version).
+        """
+        sim_rate = float(sim_rate)
+        viz_rate = float(viz_rate)
+
+        with self.cond:
+            n = len(self.buffer)
+
+            # 1) Overflow: buffer too large => sim too fast overall
+            if n > self.buffer_safe_max:
+                print("[Data] Buffer overflow detected: pausing simulation.")
+                self._set_sim_paused_locked(True) # Immediate action: pause simulation
+                self.cond.notify_all() # notify sim thread
+                return
+
+            if self.sim_paused and n < (self.buffer_safe_max - self.pillow):
+                print("[Data] Buffer back to safe levels: resuming simulation.") # Unpause when safely back below the pillow region (the buffer of the buffer, I love this)
+                self._set_sim_paused_locked(False)
+
+            # 2) Underflow: buffer too small => viz too fast overall
+            if n < self.buffer_safe_min and not self.sim_finished:
+                new_viz = max(self.min_viz_fps, sim_rate - self.viz_margin_fps) # can't be below one. If it doesn't recover at 1, the sim is too slow.
+                if sim_rate == 0.0:
+                    print("[Data] Warning: simulation was found stopped during underflow.")
+                    self._set_sim_paused_locked(False) # it really shouldn't be paused if we’re starving, but better to be safe
+
+                self._set_viz_target_fps_locked(new_viz)
+                self.cond.notify_all()
+                return
+
+            self.cond.notify_all()
+
+
+    # Command getters (used by sim/viz)
+    # ------------------------------------------------------------------
+    def get_viz_target_fps(self) -> float:
+        with self.lock:
+            return self.viz_target_fps
+
+    def get_viz_cmd_version(self) -> int:
+        with self.lock:
+            return self.viz_cmd_version
+
+    def is_sim_paused(self) -> bool:
+        with self.lock:
+            return self.sim_paused
+
+    def get_sim_cmd_version(self) -> int:
+        with self.lock:
+            return self.sim_cmd_version
 
     def __len__(self) -> int:
-        return len(self.buffer)
+        with self.lock:
+            return len(self.buffer)
+
+
+    # Command setters (data use only)
+    # ------------------------------------------------------------------
+    def _set_viz_target_fps_locked(self, new_fps: float) -> None:
+        new_fps = float(new_fps)
+        if new_fps < self.min_viz_fps: # enforce minimum
+            new_fps = self.min_viz_fps
+        if new_fps > self.max_viz_fps: # enforce maximum
+            new_fps = self.max_viz_fps
+
+        if abs(new_fps - self.viz_target_fps) > 1e-12: # avoid changes due to just numerical noise
+            self.viz_target_fps = new_fps
+            self.viz_cmd_version += 1 # notify viz of command change
+
+    def _set_sim_paused_locked(self, paused: bool) -> None:
+        if paused != self.sim_paused:
+            self.sim_paused = paused
+            self.sim_cmd_version += 1
