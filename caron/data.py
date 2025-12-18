@@ -89,6 +89,7 @@ class Data:
             n = len(self.buffer)
             if n < self.buffer_safe_min and not self.sim_finished: #Underflow: buffer too small => viz too fast overall
                 new_viz = max(self.min_viz_fps, sim_rate - self.viz_margin_fps) # can't be below one. If it doesn't recover at 1, the sim is too slow.
+                print(f"[Data] Buffer underflow detected: Visualization FPS reduced to {new_viz} Hz")
                 if sim_rate == 0.0:
                     print("[Data] Warning: simulation was found stopped during underflow.")
                     self._set_sim_paused_locked(False) # it really shouldn't be paused if we’re starving, but better to be safe

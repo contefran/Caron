@@ -78,6 +78,9 @@ class Visualization:
         self._avg_fps: float = 0.0 # current average visualization fps
         self._seen_viz_cmd_version: int = 0 # in underflow, the bump changes this value and resets the avg measurement
 
+        # Slider
+        self._programmatic_slider_update = False # to update the slider when the fps is forced down by the buffer
+        self.slider_tag = "Caron FPS Slider"
         # DearPyGui tags
         #self._font_tag: str = "big_font"
 
@@ -137,7 +140,7 @@ class Visualization:
                 with dpg.group(label="Slider"): # above there is the slider
                     dpg.add_slider_int(
                         label="Speed (FPS)",
-                        tag="Caron FPS Slider",
+                        tag=self.slider_tag,
                         width=int(self.sim_size*2),
                         height=int(self.sim_size*1),
                         default_value=int(self.fps),
@@ -246,6 +249,17 @@ class Visualization:
         if reset_measurement:
             self._reset_rate_measurement(now)
 
+        if update_slider and dpg.does_item_exist(self.slider_tag): 
+            cfg = dpg.get_item_configuration(self.slider_tag)
+            vmin = int(cfg.get("min_value", 1))
+            vmax = int(cfg.get("max_value", max(1, int(round(self.fps)))))
+            slider_val = int(round(self.fps))
+            #slider_val = max(vmin, min(vmax, slider_val))
+
+            self._programmatic_slider_update = True
+            dpg.set_value(self.slider_tag, slider_val) # change the slider value as well
+            self._programmatic_slider_update = False
+
 
 # Callbacks (operate via user_data)
 # ----------------------------------------------------------------------
@@ -271,6 +285,8 @@ def _stop_callback(sender, app_data, user_data: Visualization):
 
 def _fps_callback(sender, app_data, user_data: Visualization):
     """ app_data is the slider value """
+    if user_data._programmatic_slider_update:
+        return
     now = time.perf_counter()
     user_data.fps = float(max(1, int(app_data))) # avoid negatives
     user_data._frame_period = 1.0 / user_data.fps # new frame visualization period
@@ -330,7 +346,7 @@ def _update_frame(sender, app_data, user_data: Visualization):
             t_display = time.perf_counter()
 
             if user_data.running and not user_data.calibrating: # running only after the calibration
-                user_data._rate_tick_frame_displayed(now)
+                user_data._rate_tick_frame_displayed(t_display)
 
             # Calibration
             if user_data.calibrating:
