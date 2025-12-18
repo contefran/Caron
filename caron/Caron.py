@@ -14,7 +14,7 @@ class Main:
     # ------------------------------------------------------------------
     def __init__(self):
         self.args = self.parse_args()
-        self.data = Data(buffer_safe_min=self.args.calib_frames, buffer_safe_max=500, viz_target_fps=self.args.viz_fps)
+        self.data = Data(buffer_safe_min=self.args.calib_frames, buffer_safe_max=self.args.buffer_safe_max, viz_target_fps=self.args.viz_fps)
         self.sim = Simulation(data=self.data,args=self.args)
         self.viz = Visualization(data=self.data,args=self.args)
 
@@ -26,6 +26,7 @@ class Main:
         parser.add_argument("--viz_fps",type=float,default=100,help="Initial visualisation FPS")
         parser.add_argument("--calib_time",type=float,default=3,help="FPS calibration time in seconds [Default: 3s]")
         parser.add_argument("--calib_frames",type=int,default=50,help="Minimum number of frames for FPS calibration [Default: 50 frames]")
+        parser.add_argument("--buffer_safe_max",type=int,default=300,help="Maximum number of frames in the buffer before activating overflow [Default: 300 frames]")
         parser.add_argument("--sim_file",type=str,default="../mock_sim.npy",help="Mock simulation file [Default: mock_sim.npy]")
         parser.add_argument("--no_sim",action="store_true",help="Disable simulation (visualise mock simulation only)")
         parser.add_argument("--no_viz",action="store_true",help="Disable visualisation (run simulation only)")

@@ -78,7 +78,7 @@ class Simulation:
             pushed += 1
 
             t_next += dt
-            if t_push > t_next + dt: # apply the cumulative drift correction: if we're behind, catch up
+            if t_push > t_next + dt: # the cumulative drift correction: if we're behind, catch up
                 t_next = t_push + dt
 
             # periodic report

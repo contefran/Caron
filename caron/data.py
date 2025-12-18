@@ -46,6 +46,7 @@ class Data:
                 print("[Data] Buffer empty.")
                 return None
             frame = self.buffer.popleft()
+            self._apply_safe_control_sim() # Apply control logic based on new buffer size
             self.cond.notify_all()
             return frame
         
@@ -56,10 +57,13 @@ class Data:
         """Control based purely on buffer size and measured rates."""
         n = len(self.buffer)
         # Buffer overflow: sim too fast, pause it
-        if n > self.buffer_safe_max:
-            self.sim_paused = True
-        elif n < (self.buffer_safe_max - self.pillow):
-            self.sim_paused = False
+        if n > self.buffer_safe_max and not self.sim_paused:
+            print("[Data] Buffer overflow detected: pausing simulation.")
+            self._set_sim_paused_locked(True)
+            self.cond.notify_all() # notify sim thread
+        elif n < (self.buffer_safe_max - self.pillow) and self.sim_paused:
+            print("[Data] Buffer back to safe levels: resuming simulation.")
+            self._set_sim_paused_locked(False)
 
     def wait_if_sim_paused(self, timeout: float = 0.1) -> None:
         with self.cond:
@@ -72,37 +76,18 @@ class Data:
     def balance_rates(self, sim_rate: float, viz_rate: float) -> None:
         """
         Controller clock.
-
         Inputs:
           sim_rate: measured simulation push rate (Hz)
           viz_rate: measured visualization pop/render rate (Hz)
-
         Outputs (commands):
-          - adjusts self.viz_target_fps
-          - pauses/unpauses simulation via self.sim_paused
-
-        IMPORTANT:
-          - Simulation/Visualization should reset their measurement windows when they detect a command version bump (viz_cmd_version / sim_cmd_version).
+          - adjusts visualization target fps
         """
         sim_rate = float(sim_rate)
         viz_rate = float(viz_rate)
 
         with self.cond:
             n = len(self.buffer)
-
-            # 1) Overflow: buffer too large => sim too fast overall
-            if n > self.buffer_safe_max:
-                print("[Data] Buffer overflow detected: pausing simulation.")
-                self._set_sim_paused_locked(True) # Immediate action: pause simulation
-                self.cond.notify_all() # notify sim thread
-                return
-
-            if self.sim_paused and n < (self.buffer_safe_max - self.pillow):
-                print("[Data] Buffer back to safe levels: resuming simulation.") # Unpause when safely back below the pillow region (the buffer of the buffer, I love this)
-                self._set_sim_paused_locked(False)
-
-            # 2) Underflow: buffer too small => viz too fast overall
-            if n < self.buffer_safe_min and not self.sim_finished:
+            if n < self.buffer_safe_min and not self.sim_finished: #Underflow: buffer too small => viz too fast overall
                 new_viz = max(self.min_viz_fps, sim_rate - self.viz_margin_fps) # can't be below one. If it doesn't recover at 1, the sim is too slow.
                 if sim_rate == 0.0:
                     print("[Data] Warning: simulation was found stopped during underflow.")
