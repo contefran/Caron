@@ -97,7 +97,7 @@ if __name__ == "__main__":
 """Todo:
 - What happens if the buffer is empty? The visualizer should wait for new frames.
 - Colormaps? Can they be defined also for log scale?
-- max_viz_fps obtained after calibration should override max_fps_viz in Data.
+- max_viz_fps obtained after calibration should override max_viz_fps in Data (still fixed at 60 Hz).
 - the average fps calculation reset should happen also when manually changing the slider
 - Implement verbose mode
 """
