@@ -15,7 +15,7 @@ class Data:
     args: Namespace
     maxlen = None
     min_viz_fps: float = 1.0 # minimum allowed viz fps during balancing
-    max_viz_fps: float = 60.0 # maximum allowed viz fps during balancing, in the beginning. It is updated later by the visualizer after calibration (also setting the slider maximum)
+    max_viz_fps: float =80.0 # maximum allowed viz fps during balancing, in the beginning. It is updated later by the visualizer after calibration (also setting the slider maximum)
     viz_margin:float = 5.0 # [frames] margin before pausing/resuming the simulation
     viz_margin_fps: float = 5.0  # keep viz slightly slower than sim when starving
     pillow:int = 5 # [frames] thin boundary region to avoid rapid pause/resume cycles

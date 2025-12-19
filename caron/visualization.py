@@ -51,7 +51,7 @@ class Visualization:
 
         self.finished: bool = False
         self.running: bool = False
-        self.fps = float(self.args.viz_fps)
+        self.fps = float(self.data.max_viz_fps)
         self.max_viz_fps: float = self.fps  # after calibration will be changed to the actual max FPS
         self._frame_period = 1.0 / self.fps
         self._next_due_time = time.perf_counter()  # better clock for intervals
@@ -146,7 +146,7 @@ class Visualization:
                         height=int(self.sim_size*1),
                         default_value=int(self.fps),
                         min_value=1,
-                        max_value=int(self.fps),
+                        max_value=int(self.data.max_viz_fps),
                         callback=_fps_callback,
                         user_data=self,
                     )
@@ -381,6 +381,7 @@ def _update_frame(sender, app_data, user_data: Visualization):
 
                     max_slider = max(1, int(measured_fps))
                     print(f"[Viz] Calibration complete: max viz FPS ≈ {measured_fps:.2f}")
+                    user_data.data.max_viz_fps = measured_fps
 
                     # Resize slider to [1, measured_max] and set it to max
                     dpg.configure_item(

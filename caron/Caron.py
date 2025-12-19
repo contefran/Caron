@@ -23,7 +23,7 @@ class Main:
         parser = argparse.ArgumentParser(prog="Caron")
         parser.add_argument("--sim_size",type=int,default=512,help="Linear size of the simulation grid [Default: 512]")
         parser.add_argument("--n_frames",type=int,default=200,help="Number of simulation frames [Default: 200]")
-        parser.add_argument("--viz_fps",type=float,default=100,help="Initial visualisation FPS")
+        #parser.add_argument("--viz_fps",type=float,default=100,help="Initial visualisation FPS")
         parser.add_argument("--calib_time",type=float,default=3,help="FPS calibration time in seconds [Default: 3s]")
         parser.add_argument("--calib_frames",type=int,default=50,help="Minimum number of frames for FPS calibration [Default: 50 frames]")
         parser.add_argument("--buffer_safe_max",type=int,default=300,help="Maximum number of frames in the buffer before activating overflow [Default: 300 frames]")
@@ -100,5 +100,7 @@ if __name__ == "__main__":
 
 """Todo:
 - Colormaps? Can they be defined also for log scale?
-- max_viz_fps obtained after calibration should override max_viz_fps in Data (still fixed at 60 Hz).
+  At that point one can operate the slider, and not before.
+  Clean the parsing (initial viz_fps not used anymore).
+  Do not let anyone change the slider during calibration.
 """
