@@ -30,6 +30,7 @@ class Simulation:
         self._avg_fps: float = 0.0 # current average simulation fps
         self._seen_sim_cmd_version: int = 0 # in overflow, the bump changes this value and resets the avg measurement
 
+
     # Runs
     # ----------------------------------------------------------------------
     def run(self) -> None:
@@ -41,7 +42,7 @@ class Simulation:
         self.sim_file = self.args.sim_file
         sim=np.load(self.sim_file)
         self.sim_size: int = sim.shape[1]
-        print(f"[Sim] Loaded mock simulation from {self.sim_file} with {sim.shape[2]} frames of linear size {sim[0].shape[1]}.")
+        print(f"[Sim] Loaded mock simulation from {self.sim_file} with {sim.shape[0]} frames of linear size {sim[0].shape[1]}.")
         print(f"[Sim] Simulation initialized in fake_injection mode. Injecting the buffer at {self.sim_fps} FPS.")
 
         dt = 1.0 / self.sim_fps # seconds per frame of the mock simulation injection
@@ -85,7 +86,8 @@ class Simulation:
             if (t_push - last_report_t) >= report_every_s:
                 inst_fps = (pushed - last_report_pushed) / (t_push - last_report_t) # instantaneous fps over the last interval
                 avg_fps = self.get_measured_fps() # average fps in this unpaused segment
-                print(f"[Sim] pushed={pushed}/{sim.shape[0]} | buffer={len(self.data)} | inst≈{inst_fps:.2f} Hz | avg≈{avg_fps:.2f} Hz")
+                if self.args.verbose:
+                    print(f"[Sim] pushed={pushed}/{sim.shape[0]} | buffer={len(self.data)} | inst≈{inst_fps:.2f} Hz | avg≈{avg_fps:.2f} Hz")
                 last_report_t = t_push
                 last_report_pushed = pushed
 

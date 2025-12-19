@@ -1,10 +1,10 @@
 import time
 import numpy as np
-from matplotlib import colormaps as cm
-import dearpygui.dearpygui as dpg
 from numba import njit
-from caron.data import Data
+from matplotlib import colormaps as cm
 import threading
+import dearpygui.dearpygui as dpg
+from caron.data import Data
 
 
 @njit
@@ -94,7 +94,8 @@ class Visualization:
         self.frames = self.data.buffer  # already a deque, as set in Data. Here it should be already populated by the full sim (no_sim) or by the injection (fake or not)
         if not self.frames: # and it would be very weird
             raise RuntimeError("[Viz] Visualization initialised with an empty buffer.")
-        print(f"[Viz] Loaded a simulation of size {self.sim_size}x{self.sim_size} with {len(self.frames)} frames as initial buffering.")
+        if self.args.verbose:
+            print(f"[Viz] Loaded a simulation of size {self.sim_size}x{self.sim_size} with {len(self.frames)} frames as initial buffering.")
 
         # Precompute first frame to initialise the texture
         frame = self.frames[0] # still works with deque, I'm already in love
