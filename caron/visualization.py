@@ -20,6 +20,13 @@ def normalize_frame(frame):
                 norm[i, j] = 1.0
     return norm
 
+@njit
+def build_log_map(alpha = 50.0): # alpha is the compression strenght. The larger the value, the higher the log compression
+    """ maps linear [0..255] -> log-compressed [0..255] """
+    x = np.linspace(0.0, 1.0, 256)
+    y = np.log1p(alpha * x) / np.log1p(alpha)
+    return (y * 255.0).astype(np.uint8)
+
 
 class Visualization:
     """
@@ -78,10 +85,29 @@ class Visualization:
         self._avg_fps: float = 0.0 # current average visualization fps
         self._seen_viz_cmd_version: int = 0 # in underflow, the bump changes this value and resets the avg measurement
 
-        # Slider
+        # LUTs for colormaps
+        self.luts = {
+            "inferno": (cm["inferno"](np.linspace(0, 1, 256))[:, :3] * 255).astype(np.uint8),
+            "viridis": (cm["viridis"](np.linspace(0, 1, 256))[:, :3] * 255).astype(np.uint8),
+            "Greys":   (cm["Greys"](np.linspace(0, 1, 256))[:, :3] * 255).astype(np.uint8),
+            "Blues":   (cm["Blues"](np.linspace(0, 1, 256))[:, :3] * 255).astype(np.uint8),
+            "Greens":  (cm["Greens"](np.linspace(0, 1, 256))[:, :3] * 255).astype(np.uint8),
+            "Oranges": (cm["Oranges"](np.linspace(0, 1, 256))[:, :3] * 255).astype(np.uint8),
+        }
+        self.cmap_names = list(self.luts.keys())
+        self.current_cmap = "inferno"
+        self.current_lut = self.luts[self.current_cmap]
+
+        # Sliders
         self._programmatic_slider_update = False # to update the slider when the fps is forced down by the buffer
         self.slider_tag = "Caron FPS Slider"
-        # DearPyGui tags
+        self.cmap_list_tag = "Caron Colormap List"
+        self.log_strength_tag = "Caron Log Strength Slider"
+        self.log_scale: bool = False
+        self.log_alpha: float = 50.0 # compression log strength
+        self.log_map = build_log_map(self.log_alpha) # basically mapping the log scale once on a 1D array
+       
+       # DearPyGui tags
         #self._font_tag: str = "big_font"
 
 
@@ -105,9 +131,6 @@ class Visualization:
         frame_rgb = np.stack((frame_norm,) * 3, axis=-1)
         frame_rgb = frame_rgb.astype(np.float32) / np.max(frame_rgb)
         self.frame_flattened: np.ndarray = frame_rgb.flatten()
-
-        # LUT for inferno colormap
-        self.inferno_lut: np.ndarray = (cm['inferno'](np.linspace(0, 1, 256))[:, :3] * 255).astype(np.uint8)
 
         # DearPyGui setup
         dpg.create_context()
@@ -152,8 +175,37 @@ class Visualization:
                         enabled=False, # don't allow changes until the calibration is finished
                     )
                 with dpg.group(label="Map & Keys", horizontal=True): # below there is the image and the buttons
-                    dpg.add_image("frame_tag", width = self.sim_size *2, height= self.sim_size *2) # the image on the left
-                    with dpg.group(label="Start&Stop"): # the buttons on the right
+                    with dpg.group(label='Colormap & Color Combo'): # image and color listbox on the left
+                        dpg.add_image("frame_tag", width = int(self.sim_size *1.9), height= int(self.sim_size *1.9)) 
+                        with dpg.group(label="", horizontal=True):
+                            dpg.add_combo(
+                                tag=self.cmap_list_tag,
+                                items=self.cmap_names,
+                                default_value=self.current_cmap,
+                                width=int(self.sim_size * 1.9),
+                                callback=_colormap_callback,
+                                user_data=self,
+                                # Optional, if your DearPyGui version supports it:
+                                # popup_height_mode=dpg.mvComboHeight_Large,
+                            )
+                            dpg.add_checkbox(
+                                label="Log",
+                                default_value=self.log_scale,
+                                callback=_log_checkbox_callback,
+                                user_data=self,
+                            )
+                        dpg.add_slider_float(
+                            tag=self.log_strength_tag,
+                            default_value=self.log_alpha,
+                            min_value=1.0,
+                            max_value=500.0,
+                            format="%.1f",
+                            callback=_log_strength_callback,
+                            user_data=self,
+                            width=int(self.sim_size * 1.9),
+                            enabled=False,
+                        )
+                    with dpg.group(label="Start & Stop"): # the buttons on the right
                         dpg.add_button( # the start button above
                             label="Start",
                             callback=_start_callback,
@@ -234,10 +286,8 @@ class Visualization:
             ver = self.data.get_viz_cmd_version()
         except Exception:
             ver = getattr(self.data, "viz_cmd_version", 0)
-
         if ver == self._seen_viz_cmd_version: # no change happened
             return
-
         self._seen_viz_cmd_version = ver # change obviously happened
         target = self.data.get_viz_target_fps() # get the needed fps as calculated by Data
         self._apply_new_fps(target, now, update_slider=True, reset_measurement=True)
@@ -250,14 +300,8 @@ class Visualization:
         self._next_due_time = now + self._frame_period # align schedule
         if reset_measurement:
             self._reset_rate_measurement(now)
-
         if update_slider and dpg.does_item_exist(self.slider_tag): 
-            cfg = dpg.get_item_configuration(self.slider_tag)
-            vmin = int(cfg.get("min_value", 1))
-            vmax = int(cfg.get("max_value", max(1, int(round(self.fps)))))
             slider_val = int(round(self.fps))
-            #slider_val = max(vmin, min(vmax, slider_val))
-
             self._programmatic_slider_update = True
             dpg.set_value(self.slider_tag, slider_val) # change the slider value as well
             self._programmatic_slider_update = False
@@ -266,6 +310,7 @@ class Visualization:
 # Callbacks (operate via user_data)
 # ----------------------------------------------------------------------
 def _start_callback(sender, app_data, user_data: Visualization):
+    "Start button"
     user_data.running = True
     now = time.perf_counter()
 
@@ -278,6 +323,7 @@ def _start_callback(sender, app_data, user_data: Visualization):
         user_data._next_due_time = now # Normal mode: align schedule so next update can happen promptly
 
 def _stop_callback(sender, app_data, user_data: Visualization):
+    "Stop button"
     user_data.running = False
     now = time.perf_counter()
     user_data._rate_on_stop(now) #stop the avg fps measurement for now
@@ -286,7 +332,7 @@ def _stop_callback(sender, app_data, user_data: Visualization):
         user_data.calib_active_start = None
 
 def _fps_callback(sender, app_data, user_data: Visualization):
-    """ app_data is the slider value """
+    """For add_slider_int, app_data is the slider value"""
     if user_data._programmatic_slider_update:
         return
     now = time.perf_counter()
@@ -294,6 +340,32 @@ def _fps_callback(sender, app_data, user_data: Visualization):
     user_data._frame_period = 1.0 / user_data.fps # new frame visualization period
     user_data._next_due_time = now + user_data._frame_period  # re-align schedule
     user_data._reset_rate_measurement(now)
+
+def _colormap_callback(sender, app_data, user_data: Visualization):
+    """For add_combo, app_data is the selected string"""
+    name = str(app_data)  # selected map
+    if name in user_data.luts:
+        user_data.current_cmap = name
+        user_data.current_lut = user_data.luts[name]
+
+def _log_checkbox_callback(sender, app_data, user_data: Visualization):
+    "Log button"
+    user_data.log_scale = bool(app_data)
+    if bool(app_data):
+        dpg.configure_item(
+            user_data.log_strength_tag,
+            enabled=True,
+                        )
+    else:
+        dpg.configure_item(
+            user_data.log_strength_tag,
+            enabled=False,
+                        )
+
+def _log_strength_callback(sender, app_data, user_data: Visualization):
+    "Log slider"
+    user_data.log_alpha = float(app_data)
+    user_data.log_map = build_log_map(user_data.log_alpha) # quick recompute (256 int)
 
 def _update_frame(sender, app_data, user_data: Visualization):
     """
@@ -340,7 +412,9 @@ def _update_frame(sender, app_data, user_data: Visualization):
             frame_norm = normalize_frame(frame)
             # Apply LUT instead of colormap
             indices = (frame_norm * 255).astype(np.uint8)
-            frame_rgb = user_data.inferno_lut[indices]
+            if user_data.log_scale:
+                indices = user_data.log_map[indices]
+            frame_rgb = user_data.current_lut[indices]
             frame_flattened = frame_rgb.flatten().astype(np.float32) / 255.0
             dpg.set_value("frame_tag", frame_flattened)
             user_data.frame_index += 1
