@@ -454,8 +454,8 @@ def _update_frame(sender, app_data, user_data: Visualization):
                     user_data._frame_period = 1.0 / user_data.fps
                     user_data._next_due_time = now + user_data._frame_period
 
-                    max_slider = max(1, int(measured_fps))
-                    print(f"[Viz] Calibration complete: max viz FPS ≈ {measured_fps:.2f}")
+                    max_slider = max(1, round(measured_fps))
+                    print(f"[Viz] Calibration complete: max viz FPS ≈ {max_slider} Hz")
                     user_data.data.max_viz_fps = measured_fps
 
                     # Resize slider to [1, measured_max], set it to max, and enable it from now on
