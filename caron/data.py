@@ -15,7 +15,7 @@ class Data:
     args: Namespace
     maxlen = None
     min_viz_fps: float = 1.0 # minimum allowed viz fps during balancing
-    max_viz_fps: float =80.0 # maximum allowed viz fps during balancing, in the beginning. It is updated later by the visualizer after calibration (also setting the slider maximum)
+    max_viz_fps: float =120.0 # maximum allowed viz fps during balancing, in the beginning. It is updated later by the visualizer after calibration (also setting the slider maximum)
     viz_margin:float = 5.0 # [frames] margin before pausing/resuming the simulation
     viz_margin_fps: float = 5.0  # keep viz slightly slower than sim when starving
     pillow:int = 5 # [frames] thin boundary region to avoid rapid pause/resume cycles
@@ -30,7 +30,7 @@ class Data:
         self.cond = threading.Condition(self.lock) # to notify when new frames are available
         self.buffer_safe_min=self.args.calib_frames
         self.buffer_safe_max=self.args.buffer_safe_max
-        self.viz_target_fps=self.args.viz_fps
+        self.viz_target_fps=self.max_viz_fps
 
     # Functions that act on the buffer
     # ------------------------------------------------------------------
@@ -94,13 +94,14 @@ class Data:
             n = len(self.buffer)
             if n < self.buffer_safe_min and not self.sim_finished: #Underflow: buffer too small => viz too fast overall
                 new_viz = max(self.min_viz_fps, sim_rate - self.viz_margin_fps) # can't be below one. If it doesn't recover at 1, the sim is too slow.
-                print(f"[Data] Buffer underflow detected: Visualization FPS reduced to {new_viz} Hz")
-                if sim_rate == 0.0:
-                    print("[Data] Warning: simulation was found stopped during underflow.")
-                    self._set_sim_paused_locked(False) # it really shouldn't be paused if we’re starving, but better to be safe
+                if abs(new_viz - self.viz_target_fps) > 1e-12: # don't span this action more than once because of some system numerical noise
+                    print(f"[Data] Buffer underflow detected: Visualization FPS reduced to {new_viz} Hz")
+                    if sim_rate == 0.0:
+                        print("[Data] Warning: simulation was found stopped during underflow.")
+                        self._set_sim_paused_locked(False) # it really shouldn't be paused if we’re starving, but better to be safe
 
-                self._set_viz_target_fps_locked(new_viz)
-                self.cond.notify_all()
+                    self._set_viz_target_fps_locked(new_viz)
+                    self.cond.notify_all()
                 return
 
             self.cond.notify_all()

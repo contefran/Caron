@@ -149,6 +149,7 @@ class Visualization:
                         max_value=int(self.data.max_viz_fps),
                         callback=_fps_callback,
                         user_data=self,
+                        enabled=False, # don't allow changes until the calibration is finished
                     )
                 with dpg.group(label="Map & Keys", horizontal=True): # below there is the image and the buttons
                     dpg.add_image("frame_tag", width = self.sim_size *2, height= self.sim_size *2) # the image on the left
@@ -383,13 +384,17 @@ def _update_frame(sender, app_data, user_data: Visualization):
                     print(f"[Viz] Calibration complete: max viz FPS ≈ {measured_fps:.2f}")
                     user_data.data.max_viz_fps = measured_fps
 
-                    # Resize slider to [1, measured_max] and set it to max
+                    # Resize slider to [1, measured_max], set it to max, and enable it from now on
                     dpg.configure_item(
-                        "Caron FPS Slider",
+                        user_data.slider_tag,
                         min_value=1,
                         max_value=max_slider,
                         default_value=max_slider,
+                        enabled=True,
                     )
+                    user_data._programmatic_slider_update = True
+                    dpg.set_value(user_data.slider_tag, max_slider) # update it (need to set up an "updating" flag first)
+                    user_data._programmatic_slider_update = False
 
     # Re-register callback one (or two) dpg frame ahead
     with dpg.mutex():

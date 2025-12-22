@@ -100,7 +100,5 @@ if __name__ == "__main__":
 
 """Todo:
 - Colormaps? Can they be defined also for log scale?
-  At that point one can operate the slider, and not before.
-  Clean the parsing (initial viz_fps not used anymore).
   Do not let anyone change the slider during calibration.
 """
