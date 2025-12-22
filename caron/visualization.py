@@ -52,6 +52,7 @@ class Visualization:
             for frame in frames_array:
                 self.data.push_frame(frame) # fill the buffer with the mock sim. It's a deque
 
+        # simulation size
         self.sim_size = self.args.sim_size
         if self.args.no_sim:
             self.sim_size: int = self.frames[0].shape[1]
@@ -62,6 +63,8 @@ class Visualization:
         self.max_viz_fps: float = self.fps  # after calibration will be changed to the actual max FPS
         self._frame_period = 1.0 / self.fps
         self._next_due_time = time.perf_counter()  # better clock for intervals
+
+        self._last_frame: np.ndarray | None = None # here we cache the last frame, in case we want to modify it while pausing (e.g. log scale)
 
         # For debugging prints only (actual time between updates)
         self.last_update_time: float = self._next_due_time
@@ -98,11 +101,12 @@ class Visualization:
         self.current_cmap = "inferno"
         self.current_lut = self.luts[self.current_cmap]
 
-        # Sliders
+        # Sliders and tags
         self._programmatic_slider_update = False # to update the slider when the fps is forced down by the buffer
         self.slider_tag = "Caron FPS Slider"
         self.cmap_list_tag = "Caron Colormap List"
         self.log_strength_tag = "Caron Log Strength Slider"
+        self.texture_tag = "frame_tag"
         self.log_scale: bool = False
         self.log_alpha: float = 50.0 # compression log strength
         self.log_map = build_log_map(self.log_alpha) # basically mapping the log scale once on a 1D array
@@ -145,7 +149,7 @@ class Visualization:
                 int(self.sim_size),
                 default_value=self.frame_flattened.tolist(),
                 format=dpg.mvFormat_Float_rgb,
-                tag="frame_tag",
+                tag=self.texture_tag,
             )
 
         # Window / layout
@@ -176,7 +180,7 @@ class Visualization:
                     )
                 with dpg.group(label="Map & Keys", horizontal=True): # below there is the image and the buttons
                     with dpg.group(label='Colormap & Color Combo'): # image and color listbox on the left
-                        dpg.add_image("frame_tag", width = int(self.sim_size *1.9), height= int(self.sim_size *1.9)) 
+                        dpg.add_image(texture_tag=self.texture_tag, width = int(self.sim_size *1.9), height= int(self.sim_size *1.9)) 
                         with dpg.group(label="", horizontal=True):
                             dpg.add_combo(
                                 tag=self.cmap_list_tag,
@@ -347,6 +351,7 @@ def _colormap_callback(sender, app_data, user_data: Visualization):
     if name in user_data.luts:
         user_data.current_cmap = name
         user_data.current_lut = user_data.luts[name]
+    _refresh_current_frame(user_data)
 
 def _log_checkbox_callback(sender, app_data, user_data: Visualization):
     "Log button"
@@ -361,11 +366,32 @@ def _log_checkbox_callback(sender, app_data, user_data: Visualization):
             user_data.log_strength_tag,
             enabled=False,
                         )
+    _refresh_current_frame(user_data)
 
 def _log_strength_callback(sender, app_data, user_data: Visualization):
     "Log slider"
     user_data.log_alpha = float(app_data)
     user_data.log_map = build_log_map(user_data.log_alpha) # quick recompute (256 int)
+    _refresh_current_frame(user_data)
+
+
+# Frame rendering and updating
+# ----------------------------------------------------------------------
+def _render_frame(user_data: Visualization, frame: np.ndarray) -> None:
+    frame_norm = normalize_frame(frame)
+    # Apply LUT instead of colormap
+    indices = (frame_norm * 255).astype(np.uint8)
+    if user_data.log_scale:
+        indices = user_data.log_map[indices]
+    frame_rgb = user_data.current_lut[indices]
+    frame_flattened = frame_rgb.reshape(-1).astype(np.float32) / 255.0
+    with dpg.mutex():
+        dpg.set_value(user_data.texture_tag, frame_flattened)
+
+def _refresh_current_frame(user_data: Visualization) -> None:
+    if user_data._last_frame is None:
+        return
+    _render_frame(user_data, user_data._last_frame)
 
 def _update_frame(sender, app_data, user_data: Visualization):
     """
@@ -409,14 +435,8 @@ def _update_frame(sender, app_data, user_data: Visualization):
             user_data.finished = True
             return
         else:
-            frame_norm = normalize_frame(frame)
-            # Apply LUT instead of colormap
-            indices = (frame_norm * 255).astype(np.uint8)
-            if user_data.log_scale:
-                indices = user_data.log_map[indices]
-            frame_rgb = user_data.current_lut[indices]
-            frame_flattened = frame_rgb.flatten().astype(np.float32) / 255.0
-            dpg.set_value("frame_tag", frame_flattened)
+            user_data._last_frame = frame # let's cache the frame just in case
+            _render_frame(user_data, frame)
             user_data.frame_index += 1
 
             t_display = time.perf_counter()
