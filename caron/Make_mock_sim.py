@@ -139,6 +139,7 @@ frames_upward=np.rot90(frames_leftward, -1, (1,2))
 frames_rightward=np.rot90(frames_upward, -1, (1,2))
 frames_downward=np.rot90(frames_rightward, -1, (1,2))
 joined_frames=np.stack((frames_leftward,frames_upward,frames_rightward,frames_downward),axis=0)
+joined_frames = joined_frames.transpose(1, 0, 2, 3) # we want (time, quantity, size^2)
 
 
 # Create output directory if it does not exist

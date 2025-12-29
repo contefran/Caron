@@ -32,6 +32,7 @@ class Data:
         self.buffer_safe_max=self.args.buffer_safe_max
         self.viz_target_fps=self.max_viz_fps
 
+
     # Functions that act on the buffer
     # ------------------------------------------------------------------
     def push_frame(self, frame: np.ndarray) -> None:

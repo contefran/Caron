@@ -34,6 +34,7 @@ class Main:
         parser.add_argument("--fake_sim_fps",type=int,default=60,help="Fake simulation injection fps, when --fake_injection is invoked [Default: 60Hz]")
         parser.add_argument("--ctrl_dt", type=float, default=0.2,help="Control loop tick interval in seconds [Default: 0.2s]")
         parser.add_argument("--verbose",action="store_true",help="Print verbose diagnostics")
+        parser.add_argument("--single_quantity",action="store_true",help="Use only a single quantity from the simulation")
         return parser.parse_args()
 
 

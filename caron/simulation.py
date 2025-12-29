@@ -41,8 +41,8 @@ class Simulation:
         self.sim_fps=self.args.fake_sim_fps #Hz mock simulation fps
         self.sim_file = self.args.sim_file
         sim=np.load(self.sim_file)
-        self.sim_size: int = sim.shape[1]
-        print(f"[Sim] Loaded mock simulation from {self.sim_file} with {sim.shape[0]} frames of linear size {sim[0].shape[1]}.")
+        self.sim_size: int = sim.shape[2]
+        print(f"[Sim] Loaded mock simulation from {self.sim_file} with {sim.shape[0]} frames of linear size {sim.shape[2]}.")
         print(f"[Sim] Simulation initialized in fake_injection mode. Injecting the buffer at {self.sim_fps} FPS.")
 
         dt = 1.0 / self.sim_fps # seconds per frame of the mock simulation injection
@@ -58,8 +58,10 @@ class Simulation:
         last_report_pushed = 0
         pushed = 0 # number of pushed frames, for the average fps computation
 
-        for frame in sim:
+        for frame in sim[:,0]: # because the sim is (time, quantity, size^2) now
             now = time.perf_counter()
+            if self.args.verbose:
+                print(f"Starting frame pushing at {now}")
             self._sync_sim_command_from_data(now) # react to Data pause/unpause command and reset avg window if changed
 
             if self._is_sim_paused(): # if paused, close active segment and wait until unpaused
@@ -75,6 +77,9 @@ class Simulation:
 
             self.data.push_frame(frame) 
             t_push = time.perf_counter() # time of push completion
+            if self.args.verbose:
+                print(f"Finalized frame pushing at {t_push}")
+
             self._rate_tick_frame_pushed(t_push) # timestamp after the frame is pushed
             pushed += 1
 
