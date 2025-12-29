@@ -133,7 +133,12 @@ for i in tqdm(range(num_frames)):
     final_frame = np.where(cone_region, noisy_cone, background)
 
     frames.append(final_frame)
-frames=np.array(frames)
+
+frames_leftward=np.array(frames)
+frames_upward=np.rot90(frames_leftward, -1, (1,2))
+frames_rightward=np.rot90(frames_upward, -1, (1,2))
+frames_downward=np.rot90(frames_rightward, -1, (1,2))
+joined_frames=np.stack((frames_leftward,frames_upward,frames_rightward,frames_downward),axis=0)
 
 
 # Create output directory if it does not exist
@@ -144,7 +149,7 @@ os.makedirs(output_dir, exist_ok=True)
 # Save an image of a few frames
 if save_frames:
     inferno_cmap = matplotlib.colormaps['inferno']
-    for idx, frame in enumerate(frames):
+    for idx, frame in enumerate(frames_leftward):
         filename = os.path.join(output_dir, f"frame_{idx:03d}.png")
         # Apply colormap: map [0,1] --> RGBA with inferno
         frame_coloured = inferno_cmap(frame)  # returns RGBA array
@@ -155,4 +160,4 @@ if save_frames:
 
 
 # save the sim to disk
-np.save('mock_sim.npy', frames)
+np.save('../mock_sim.npy', joined_frames)
