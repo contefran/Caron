@@ -52,18 +52,18 @@ class Visualization:
             for frame in frames_array:
                 self.data.push_frame(frame) # fill the buffer with the mock sim. It's a deque
 
-        # simulation size
+        # Simulation size
         self.sim_size = self.args.sim_size
         if self.args.no_sim:
             self.sim_size: int = self.frames[0].shape[1]
 
+        # Status and main vars
         self.finished: bool = False
         self.running: bool = False
         self.fps = float(self.data.max_viz_fps)
         self.max_viz_fps: float = self.fps  # after calibration will be changed to the actual max FPS
         self._frame_period = 1.0 / self.fps
         self._next_due_time = time.perf_counter()  # better clock for intervals
-
         self._last_frame: np.ndarray | None = None # here we cache the last frame, in case we want to modify it while pausing (e.g. log scale)
 
         # For debugging prints only (actual time between updates)
@@ -101,10 +101,16 @@ class Visualization:
         self.current_cmap = "inferno"
         self.current_lut = self.luts[self.current_cmap]
 
+        # Quantities
+        self.quantities = ["West", "Nort", "East", "South"]
+        self.viz_quantity_index: int = 0 # the index of the quantity to visualize
+        self.viz_quantity: str = self.quantities[self.viz_quantity_index]
+
         # Sliders and tags
         self._programmatic_slider_update = False # to update the slider when the fps is forced down by the buffer
         self.slider_tag = "Caron FPS Slider"
-        self.cmap_list_tag = "Caron Colormap List"
+        self.cmap_list_tag = "Caron Colormaps List"
+        self.quantity_tag = "Caron Quantities List"
         self.log_strength_tag = "Caron Log Strength Slider"
         self.texture_tag = "frame_tag"
         self.log_scale: bool = False
@@ -128,7 +134,7 @@ class Visualization:
             print(f"[Viz] Loaded a simulation of size {self.sim_size}x{self.sim_size} with {len(self.frames)} frames as initial buffering.")
 
         # Precompute first frame to initialise the texture
-        frame = self.frames[0] # still works with deque, I'm already in love
+        frame = self.frames[0][self.viz_quantity_index] # still works with deque, I'm already in love
         frame_min = np.min(frame)
         frame_max = np.max(frame)
         frame_norm = (frame - frame_min) / (frame_max - frame_min)
@@ -169,8 +175,8 @@ class Visualization:
                     dpg.add_slider_int(
                         label="Speed (FPS)",
                         tag=self.slider_tag,
-                        width=int(self.sim_size*2),
-                        height=int(self.sim_size*1),
+                        width=int(self.sim_size*1.9),
+                        #height=int(self.sim_size*1),
                         default_value=int(self.fps),
                         min_value=1,
                         max_value=int(self.data.max_viz_fps),
@@ -181,16 +187,34 @@ class Visualization:
                 with dpg.group(label="Map & Keys", horizontal=True): # below there is the image and the buttons
                     with dpg.group(label='Colormap & Color Combo'): # image and color listbox on the left
                         dpg.add_image(texture_tag=self.texture_tag, width = int(self.sim_size *1.9), height= int(self.sim_size *1.9)) 
-                        with dpg.group(label="", horizontal=True):
+                        with dpg.group(label="Log visualization", horizontal=True):
                             dpg.add_combo(
                                 tag=self.cmap_list_tag,
                                 items=self.cmap_names,
                                 default_value=self.current_cmap,
-                                width=int(self.sim_size * 1.9),
+                                width=int(self.sim_size * 0.2),
                                 callback=_colormap_callback,
                                 user_data=self,
-                                # Optional, if your DearPyGui version supports it:
-                                # popup_height_mode=dpg.mvComboHeight_Large,
+                            )
+                            dpg.add_combo(
+                                tag=self.quantity_tag,
+                                items=self.quantities,
+                                default_value=self.viz_quantity,
+                                width=int(self.sim_size * 0.2),
+                                callback=_quantity_callback,
+                                user_data=self,
+                            )
+                        with dpg.group(label="Log visualization", horizontal=True):
+                            dpg.add_slider_float(
+                                tag=self.log_strength_tag,
+                                default_value=self.log_alpha,
+                                min_value=1.0,
+                                max_value=500.0,
+                                format="%.1f",
+                                callback=_log_strength_callback,
+                                user_data=self,
+                                width=int(self.sim_size * 1.8),
+                                enabled=False,
                             )
                             dpg.add_checkbox(
                                 label="Log",
@@ -198,31 +222,20 @@ class Visualization:
                                 callback=_log_checkbox_callback,
                                 user_data=self,
                             )
-                        dpg.add_slider_float(
-                            tag=self.log_strength_tag,
-                            default_value=self.log_alpha,
-                            min_value=1.0,
-                            max_value=500.0,
-                            format="%.1f",
-                            callback=_log_strength_callback,
-                            user_data=self,
-                            width=int(self.sim_size * 1.9),
-                            enabled=False,
-                        )
                     with dpg.group(label="Start & Stop"): # the buttons on the right
                         dpg.add_button( # the start button above
                             label="Start",
                             callback=_start_callback,
                             user_data=self,
-                            width=int(self.sim_size*0.1),
-                            height=int(self.sim_size*0.997),
+                            width=int(self.sim_size*0.3),
+                            height=int(self.sim_size*0.15),
                         )
                         dpg.add_button( # the stop button below
                             label="Stop",
                             callback=_stop_callback,
                             user_data=self,
-                            width=int(self.sim_size*0.1),
-                            height=int(self.sim_size*0.997),
+                            width=int(self.sim_size*0.3),
+                            height=int(self.sim_size*0.15),
                         )
 
         dpg.create_viewport(
@@ -353,6 +366,12 @@ def _colormap_callback(sender, app_data, user_data: Visualization):
         user_data.current_lut = user_data.luts[name]
     _refresh_current_frame(user_data)
 
+def _quantity_callback(sender, app_data, user_data: Visualization):
+    """For XXX app_data is the selected quantity name -- but for the moment it's the index"""
+    user_data.viz_quantity = str(app_data) # e.g. Density
+    user_data.viz_quantity_index = [i for (i,q) in enumerate(user_data.quantities) if q==user_data.viz_quantity][0] # corresponding index
+    _refresh_current_frame(user_data)
+
 def _log_checkbox_callback(sender, app_data, user_data: Visualization):
     "Log button"
     user_data.log_scale = bool(app_data)
@@ -378,7 +397,7 @@ def _log_strength_callback(sender, app_data, user_data: Visualization):
 # Frame rendering and updating
 # ----------------------------------------------------------------------
 def _render_frame(user_data: Visualization, frame: np.ndarray) -> None:
-    frame_norm = normalize_frame(frame)
+    frame_norm = normalize_frame(frame[user_data.viz_quantity_index])
     # Apply LUT instead of colormap
     indices = (frame_norm * 255).astype(np.uint8)
     if user_data.log_scale:

@@ -58,10 +58,10 @@ class Simulation:
         last_report_pushed = 0
         pushed = 0 # number of pushed frames, for the average fps computation
 
-        for frame in sim[:,0]: # because the sim is (time, quantity, size^2) now
+        for frame in sim: # because the sim is (time, quantity, size^2) now
             now = time.perf_counter()
             if self.args.verbose:
-                print(f"Starting frame pushing at {now}")
+                print(f"[Sim] Starting frame pushing at {now}")
             self._sync_sim_command_from_data(now) # react to Data pause/unpause command and reset avg window if changed
 
             if self._is_sim_paused(): # if paused, close active segment and wait until unpaused
@@ -78,7 +78,7 @@ class Simulation:
             self.data.push_frame(frame) 
             t_push = time.perf_counter() # time of push completion
             if self.args.verbose:
-                print(f"Finalized frame pushing at {t_push}")
+                print(f"[Sim] Finalized frame pushing at {t_push}")
 
             self._rate_tick_frame_pushed(t_push) # timestamp after the frame is pushed
             pushed += 1
