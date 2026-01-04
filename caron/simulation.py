@@ -4,6 +4,8 @@ from typing import Any
 import jax.numpy as jnp
 
 from caron.data import Data
+from caron.physics import primitive_to_conserved, conserved_to_primitive, physical_flux, rusanov_flux
+from jax import jit
 
 class Simulation:
     """Produces 2D frames and pushes them into the Data buffer."""
@@ -50,10 +52,12 @@ class Simulation:
             [rho[None, ...], vel, prs[None, ...]],
             axis=0
         )
+        self.data.push_frame(self.prim[0])  # Push initial density frame to data buffer
 
     def run(self) -> None:
-        
+
         raise NotImplementedError("Simulation.run is not implemented yet.")
 
     def run_no_viz(self) -> None:
+        self.cons = primitive_to_conserved(self.prim, self.gamma)
         raise NotImplementedError("Simulation.run_no_viz is not implemented yet.")
