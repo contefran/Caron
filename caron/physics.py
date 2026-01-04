@@ -55,7 +55,8 @@ def physical_flux(U, gamma, direction: int):
     U: (5, nx, ny)
     Returns F_dir(U): (5, nx, ny)
     """
-    rho, p, vel = conserved_to_primitive(U, gamma)
+    prim = conserved_to_primitive(U, gamma)
+    rho, vel, p = prim[0], prim[1:4], prim[4]
     mom = U[1:4]          # (3, nx, ny)
     E = U[4]
 
@@ -87,8 +88,10 @@ def rusanov_flux(U_L, U_R, gamma, direction: int):
     F_L = physical_flux(U_L, gamma, direction)
     F_R = physical_flux(U_R, gamma, direction)
 
-    rho_L, p_L, vel_L = conserved_to_primitive(U_L, gamma)
-    rho_R, p_R, vel_R = conserved_to_primitive(U_R, gamma)
+    prim = conserved_to_primitive(U_L, gamma)
+    rho_L, p_L, vel_L = prim[0], prim[4], prim[1:4]
+    prim = conserved_to_primitive(U_R, gamma)
+    rho_R, p_R, vel_R = prim[0], prim[4], prim[1:4]
 
     u_L = vel_L[direction]
     u_R = vel_R[direction]

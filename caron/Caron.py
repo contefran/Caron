@@ -42,7 +42,7 @@ class Main:
 
         # Phase 1: easy easy, just run one after the other
         if not self.args.no_sim:
-            self.sim.run() # fills self.data with simulation frames
+            self.sim.run_no_viz() # fills self.data with simulation frames
         if not self.args.no_viz:
             self.viz.run() # visualises self.data frames
         # Phase 2: replace with self.data class buffering

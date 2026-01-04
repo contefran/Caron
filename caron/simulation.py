@@ -4,8 +4,9 @@ from typing import Any
 import jax.numpy as jnp
 
 from caron.data import Data
-from caron.physics import primitive_to_conserved, conserved_to_primitive, physical_flux, rusanov_flux
+from caron.physics import primitive_to_conserved, conserved_to_primitive
 from jax import jit
+from solver import solve_euler_2d
 
 class Simulation:
     """Produces 2D frames and pushes them into the Data buffer."""
@@ -23,9 +24,10 @@ class Simulation:
         """Imports the initial conditions. Right now a 2D Sod shock tube is initialized, later more options will be added."""
 
         # Numerical parameters
-        self.nx: int = 100
-        self.ny: int = 100     # ny = 1 => effectively 1D
+        self.nx: int = 400
+        self.ny: int = 1     # ny = 1 => effectively 1D
         self.t_end: float = 0.2
+        self.dt = 0.001
         self.gamma: float = 1.4
         self.CFL: float = 0.8
 
@@ -52,12 +54,39 @@ class Simulation:
             [rho[None, ...], vel, prs[None, ...]],
             axis=0
         )
+        self.data.coords = self.coords
         self.data.push_frame(self.prim[0])  # Push initial density frame to data buffer
 
+    @property
+    def dx(self):
+        """
+        Grid spacing in the x-direction.
+        """
+        return (self.xmax - self.xmin) / self.nx
+
+    @property
+    def dy(self):
+        """
+        Grid spacing in the y-direction.
+        If ny = 1, this will be the full domain height (1D case).
+        """
+        # guard against ny = 0; normally ny >= 1
+        return (self.ymax - self.ymin) / max(self.ny, 1)
+
     def run(self) -> None:
+        self.cons = primitive_to_conserved(self.prim, self.gamma)
 
         raise NotImplementedError("Simulation.run is not implemented yet.")
 
     def run_no_viz(self) -> None:
         self.cons = primitive_to_conserved(self.prim, self.gamma)
-        raise NotImplementedError("Simulation.run_no_viz is not implemented yet.")
+        self.cons = solve_euler_2d(
+            U0=self.cons,
+            t_end=self.t_end,
+            dx = self.dx,
+            dy = self.dy,
+            gamma=self.gamma,
+            coords=self.coords,
+            dt = self.dt,
+        )
+        self.prim = conserved_to_primitive(self.cons, self.gamma)
