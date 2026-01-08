@@ -1,29 +1,43 @@
 """Simulation class producing data for the visualization."""
-from typing import Any
 
-import jax.numpy as jnp
 
-from caron.data import Data
-from caron.physics import primitive_to_conserved, conserved_to_primitive
-from jax import jit
-from solver import solve_euler_2d
 # imports
 from caron.data import Data
 import numpy as np
 import time
 from collections import deque
 import threading
+from typing import Any
+import jax.numpy as jnp
+from caron.physics import primitive_to_conserved, conserved_to_primitive
+from caron.solver import solve_euler_2d
+from jax import jit
 
 
 class Simulation:
     """Produces 2D frames and pushes them into the Data buffer."""
 
-    def __init__(self, data: Data, n_frames: int, size: int, init: str | None = None, **kwargs: Any) -> None:
 
+    # Initialization
+    # ------------------------------------------------------------------
+    def __init__(self, data: Data, args, init: str | None = None) -> None:
+        self.args = args
         self.data = data
-        self.n_frames = n_frames
-        self.size = size
-        self.kwargs = kwargs
+        self.sim_size: int = self.args.sim_size
+
+        # Rolling window for FPS measurement
+        self.timestamps = deque()
+        self.window_s = 2.0 # seconds
+        self.lock = threading.Lock()
+        self.cond = threading.Condition()
+
+        self._rate_lock = threading.Lock()
+        self._rate_active_start: float | None = None # start of current unpaused segment
+        self._rate_active_time: float = 0.0 # accumulated unpaused time
+        self._rate_frames: int = 0 # frames pushed since last reset
+        self._avg_fps: float = 0.0 # current average simulation fps
+        self._seen_sim_cmd_version: int = 0 # in overflow, the bump changes this value and resets the avg measurement
+
         if init is None:
             self.import_init()
 
@@ -79,26 +93,6 @@ class Simulation:
         """
         # guard against ny = 0; normally ny >= 1
         return (self.ymax - self.ymin) / max(self.ny, 1)
-
-    # Initialization
-    # ------------------------------------------------------------------
-    def __init__(self, data: Data, args) -> None:
-        self.args = args
-        self.data = data
-        self.sim_size: int = self.args.sim_size
-
-        # Rolling window for FPS measurement
-        self.timestamps = deque()
-        self.window_s = 2.0 # seconds
-        self.lock = threading.Lock()
-        self.cond = threading.Condition()
-
-        self._rate_lock = threading.Lock()
-        self._rate_active_start: float | None = None # start of current unpaused segment
-        self._rate_active_time: float = 0.0 # accumulated unpaused time
-        self._rate_frames: int = 0 # frames pushed since last reset
-        self._avg_fps: float = 0.0 # current average simulation fps
-        self._seen_sim_cmd_version: int = 0 # in overflow, the bump changes this value and resets the avg measurement
 
 
     # Runs

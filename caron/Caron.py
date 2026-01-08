@@ -45,9 +45,10 @@ class Main:
             print("[Main] Nothing to do: both --no_sim and --no_viz are set.")
             return
 
-        #if self.args.no_viz:
-        #    self.sim.run_no_viz()
-
+        if self.args.no_viz:
+            self.sim.run_no_viz() # just for debugging the simulation
+            return
+        
         # Phase 1: easy easy, just run one after the other
         #if not self.args.no_viz:
         #    self.viz.run() # visualises self.data frames
