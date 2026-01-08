@@ -58,7 +58,7 @@ class Simulation:
         last_report_pushed = 0
         pushed = 0 # number of pushed frames, for the average fps computation
 
-        for frame in sim: # because the sim is (time, quantity, size^2) now
+        for frame in sim:
             now = time.perf_counter()
             if self.args.verbose:
                 print(f"[Sim] Starting frame pushing at {now}")
