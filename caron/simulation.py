@@ -1,29 +1,43 @@
 """Simulation class producing data for the visualization."""
-from typing import Any
 
-import jax.numpy as jnp
 
-from caron.data import Data
-from caron.physics import primitive_to_conserved, conserved_to_primitive
-from jax import jit
-from solver import solve_euler_2d
 # imports
 from caron.data import Data
 import numpy as np
 import time
 from collections import deque
 import threading
+from typing import Any
+import jax.numpy as jnp
+from caron.physics import primitive_to_conserved, conserved_to_primitive
+from caron.solver import solve_euler_2d
+from jax import jit
 
 
 class Simulation:
     """Produces 2D frames and pushes them into the Data buffer."""
 
-    def __init__(self, data: Data, n_frames: int, size: int, init: str | None = None, **kwargs: Any) -> None:
 
+    # Initialization
+    # ------------------------------------------------------------------
+    def __init__(self, data: Data, args, init: str | None = None) -> None:
+        self.args = args
         self.data = data
-        self.n_frames = n_frames
-        self.size = size
-        self.kwargs = kwargs
+        self.sim_size: int = self.args.sim_size
+
+        # Rolling window for FPS measurement
+        self.timestamps = deque()
+        self.window_s = 2.0 # seconds
+        self.lock = threading.Lock()
+        self.cond = threading.Condition()
+
+        self._rate_lock = threading.Lock()
+        self._rate_active_start: float | None = None # start of current unpaused segment
+        self._rate_active_time: float = 0.0 # accumulated unpaused time
+        self._rate_frames: int = 0 # frames pushed since last reset
+        self._avg_fps: float = 0.0 # current average simulation fps
+        self._seen_sim_cmd_version: int = 0 # in overflow, the bump changes this value and resets the avg measurement
+
         if init is None:
             self.import_init()
 
@@ -80,26 +94,6 @@ class Simulation:
         # guard against ny = 0; normally ny >= 1
         return (self.ymax - self.ymin) / max(self.ny, 1)
 
-    # Initialization
-    # ------------------------------------------------------------------
-    def __init__(self, data: Data, args) -> None:
-        self.args = args
-        self.data = data
-        self.sim_size: int = self.args.sim_size
-
-        # Rolling window for FPS measurement
-        self.timestamps = deque()
-        self.window_s = 2.0 # seconds
-        self.lock = threading.Lock()
-        self.cond = threading.Condition()
-
-        self._rate_lock = threading.Lock()
-        self._rate_active_start: float | None = None # start of current unpaused segment
-        self._rate_active_time: float = 0.0 # accumulated unpaused time
-        self._rate_frames: int = 0 # frames pushed since last reset
-        self._avg_fps: float = 0.0 # current average simulation fps
-        self._seen_sim_cmd_version: int = 0 # in overflow, the bump changes this value and resets the avg measurement
-
 
     # Runs
     # ----------------------------------------------------------------------
@@ -127,8 +121,8 @@ class Simulation:
         self.sim_fps=self.args.fake_sim_fps #Hz mock simulation fps
         self.sim_file = self.args.sim_file
         sim=np.load(self.sim_file)
-        self.sim_size: int = sim.shape[1]
-        print(f"[Sim] Loaded mock simulation from {self.sim_file} with {sim.shape[0]} frames of linear size {sim[0].shape[1]}.")
+        self.sim_size: int = sim.shape[2]
+        print(f"[Sim] Loaded mock simulation from {self.sim_file} with {sim.shape[0]} frames of linear size {sim.shape[2]}.")
         print(f"[Sim] Simulation initialized in fake_injection mode. Injecting the buffer at {self.sim_fps} FPS.")
 
         dt = 1.0 / self.sim_fps # seconds per frame of the mock simulation injection
@@ -146,6 +140,8 @@ class Simulation:
 
         for frame in sim:
             now = time.perf_counter()
+            if self.args.verbose:
+                print(f"[Sim] Starting frame pushing at {now}")
             self._sync_sim_command_from_data(now) # react to Data pause/unpause command and reset avg window if changed
 
             if self._is_sim_paused(): # if paused, close active segment and wait until unpaused
@@ -161,6 +157,9 @@ class Simulation:
 
             self.data.push_frame(frame) 
             t_push = time.perf_counter() # time of push completion
+            if self.args.verbose:
+                print(f"[Sim] Finalized frame pushing at {t_push}")
+
             self._rate_tick_frame_pushed(t_push) # timestamp after the frame is pushed
             pushed += 1
 

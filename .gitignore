@@ -1,0 +1,6 @@
+frames/*
+__pycache__/*
+mock_sim.npy
+.vscode/*
+caron/frames/*
+caron/__pycache__/*
