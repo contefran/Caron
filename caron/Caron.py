@@ -45,7 +45,7 @@ class Main:
             return
 
         #if self.args.no_viz:
-        #    self.run_sim_only()
+        #    self.sim.run_no_viz()
 
         # Phase 1: easy easy, just run one after the other
         #if not self.args.no_viz:
