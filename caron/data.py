@@ -3,6 +3,7 @@ from collections import deque
 from argparse import Namespace
 import numpy as np
 import threading
+import jax.numpy as jnp
 
 
 @dataclass
@@ -23,8 +24,9 @@ class Data:
     sim_cmd_version: int = 0
     sim_paused: bool = False
     sim_finished: bool=False
-
+    
     def __post_init__(self) -> None:
+        self.coords: tuple  # to be set by simulation
         self.buffer = deque(maxlen=self.maxlen)
         self.lock = threading.Lock() # to protect buffer access
         self.cond = threading.Condition(self.lock) # to notify when new frames are available
@@ -35,7 +37,7 @@ class Data:
 
     # Functions that act on the buffer
     # ------------------------------------------------------------------
-    def push_frame(self, frame: np.ndarray) -> None:
+    def push_frame(self, frame: jnp.ndarray) -> None:
         """Add a new 2D frame to the buffer."""
         with self.cond:  # uses same lock + allows notify
             self.buffer.append(frame) # well, yeah

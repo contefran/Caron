@@ -38,6 +38,8 @@ class Simulation:
         self._avg_fps: float = 0.0 # current average simulation fps
         self._seen_sim_cmd_version: int = 0 # in overflow, the bump changes this value and resets the avg measurement
 
+        self.prim: jnp.ndarray = jnp.array([])  # will be set in import_init of by input file. Needed here because of initial push to buffer
+
         if init is None:
             self.import_init()
 
@@ -76,7 +78,7 @@ class Simulation:
             axis=0
         )
         self.data.coords = self.coords
-        self.data.push_frame(self.prim[0])  # Push initial density frame to data buffer
+        #
 
     @property
     def dx(self):
@@ -103,6 +105,7 @@ class Simulation:
         raise NotImplementedError("Simulation.run is not implemented yet.")
 
     def run_no_viz(self) -> None:
+        self.data.push_frame(self.prim)  # Push initial quantity frame to data buffer        
         self.cons = primitive_to_conserved(self.prim, self.gamma)
         self.cons = solve_euler_2d(
             U0=self.cons,
@@ -114,7 +117,6 @@ class Simulation:
             dt = self.dt,
         )
         self.prim = conserved_to_primitive(self.cons, self.gamma)
-        raise NotImplementedError("[Sim] Simulation.run is not implemented yet.")
 
     def run_mock(self) -> None:
         """Feed frames into the buffer at a fixed rate (sim_fps), and eventually get paused/unpaused."""
