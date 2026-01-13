@@ -253,6 +253,7 @@ class Visualization:
         dpg.start_dearpygui()
         dpg.destroy_context()
 
+
     # Command getters (called by Data)
     # ------------------------------------------------------------------
     def get_measured_fps(self) -> float:
