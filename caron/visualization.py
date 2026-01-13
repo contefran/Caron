@@ -102,7 +102,7 @@ class Visualization:
         self.current_lut = self.luts[self.current_cmap]
 
         # Quantities
-        self.quantities = ["West", "Nort", "East", "South"]
+        self.quantities = self.data.quantities # for instance ['Density', 'Pressure', 'Velocity']
         self.viz_quantity_index: int = 0 # the index of the quantity to visualize
         self.viz_quantity: str = self.quantities[self.viz_quantity_index]
 

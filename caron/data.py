@@ -27,6 +27,7 @@ class Data:
     
     def __post_init__(self) -> None:
         self.coords: tuple  # spatial coordinate -- to be set by simulation
+        self.quantities: list[str] # for instance ['Density', 'Pressure', 'Velocity']. Pushed by simulation
         self.buffer = deque(maxlen=self.maxlen)
         self.lock = threading.Lock() # to protect buffer access
         self.cond = threading.Condition(self.lock) # to notify when new frames are available
