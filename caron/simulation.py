@@ -40,7 +40,10 @@ class Simulation:
 
         self.prim: jnp.ndarray = jnp.array([])  # will be set in import_init of by input file. Needed here because of initial push to buffer
 
-        if init is None:
+        if args.fake_injection or args.no_sim:
+            self.quantities = ["West", "North", "East", "South"] # these have to be set in the input
+            self.data.quantities = self.quantities # and to be pushed
+        if init is None and not args.no_sim and not args.fake_injection:
             self.import_init()
 
     def import_init(self) -> None:
@@ -79,6 +82,7 @@ class Simulation:
         )
         self.data.coords = self.coords
         #
+
 
     @property
     def dx(self):
@@ -124,6 +128,17 @@ class Simulation:
         self.sim_file = self.args.sim_file
         sim=np.load(self.sim_file)
         self.sim_size: int = sim.shape[2]
+
+        # set spatial coordinates
+        self.xmin: float = 0.0
+        self.xmax: float = 1.0
+        self.ymin: float = 0.0
+        self.ymax: float = 1.0
+        x = jnp.linspace(self.xmin, self.xmax, num=self.args.sim_size)
+        y = jnp.linspace(self.ymin, self.ymax, num=self.args.sim_size)
+        self.coords = (x, y) # spatial coordinates
+        self.data.coords = self.coords # push to data
+
         print(f"[Sim] Loaded mock simulation from {self.sim_file} with {sim.shape[0]} frames of linear size {sim.shape[2]}.")
         print(f"[Sim] Simulation initialized in fake_injection mode. Injecting the buffer at {self.sim_fps} FPS.")
 
