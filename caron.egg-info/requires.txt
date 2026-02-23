@@ -1,0 +1,8 @@
+numpy
+argparse
+matplotlib
+dearpygui
+numba
+
+[jax]
+jax
