@@ -83,7 +83,7 @@ class Main:
     def _control_loop(self, dt) -> None:
         """Periodically read measured SR/VR and ask Data to adjust commands."""
         if self.args.verbose:
-            print(f"[Main] Control loop started")
+            print("[Main] Control loop started")
         while True and not self.viz.finished:
             time.sleep(dt) # What's a good monitoring rate?
             if self.viz.calibrated: # start monitoring only after calibration
