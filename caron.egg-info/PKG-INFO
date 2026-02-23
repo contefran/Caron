@@ -1,0 +1,15 @@
+Metadata-Version: 2.4
+Name: caron
+Version: 0.1
+Summary: Caron: visualization at runtime
+Author: F. Conte, G. Mattia
+License: BSD-3-Clause
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+Requires-Dist: numpy
+Requires-Dist: argparse
+Requires-Dist: matplotlib
+Requires-Dist: dearpygui
+Requires-Dist: numba
+Provides-Extra: jax
+Requires-Dist: jax; extra == "jax"

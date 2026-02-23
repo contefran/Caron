@@ -26,7 +26,6 @@ def solve_euler_2d(U0,t_end,dx,dy,gamma,coords,dt):
         U = advance_step(U, dt, dx, dy, gamma)
         t += dt
         step += 1
-
         rho = conserved_to_primitive(U, gamma)[1]
 
         ax.cla()
