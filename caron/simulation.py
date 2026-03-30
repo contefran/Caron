@@ -43,7 +43,13 @@ class Simulation:
             0  # in overflow, the bump changes this value and resets the avg measurement
         )
 
-        self.import_init(self.init_name)
+        self.prim: jnp.ndarray = jnp.array([])  # will be set in import_init of by input file. Needed here because of initial push to buffer
+
+        if args.fake_injection or args.no_sim:
+            self.quantities = ["West", "North", "East", "South"] # these have to be set in the input
+            self.data.quantities = self.quantities # and to be pushed
+        if init is None and not args.no_sim and not args.fake_injection:
+            self.import_init(self.init_name)
 
     def import_init(self, init_name: str | None = None) -> None:
         """Load one named initial-condition preset from the registry."""
@@ -67,38 +73,11 @@ class Simulation:
         self.initial_prim = init_data["prim"]
         self.prim = self.initial_prim
         self.data.coords = self.coords
+<<<<<<< simulation
+=======
+        #
 
-    def get_initial_frame_tuple(self) -> tuple[np.ndarray, float]:
-        return (np.array(self.initial_prim), 0.0)
-
-    def _stable_dt(self) -> float:
-        """Compute a CFL-safe time step and cap it by the configured dt."""
-        prim = np.array(self.prim)
-        rho = prim[0]
-        vx = prim[1]
-        vy = prim[2]
-        prs = prim[4]
-
-        rho_safe = np.maximum(rho, 1e-12)
-        prs_safe = np.maximum(prs, 1e-12)
-        cs = np.sqrt(self.gamma * prs_safe / rho_safe)
-
-        smax_x = float(np.max(np.abs(vx) + cs))
-        smax_y = float(np.max(np.abs(vy) + cs))
-
-        inv_dt = (smax_x / max(self.dx, 1e-12)) + (smax_y / max(self.dy, 1e-12))
-        if inv_dt <= 1e-12:
-            return float(self.dt)
-        return float(min(self.dt, self.CFL / inv_dt))
-
-    def request_restart(self) -> None:
-        self._restart_event.set()
-
-    def _consume_restart_request(self) -> bool:
-        if self._restart_event.is_set():
-            self._restart_event.clear()
-            return True
-        return False
+>>>>>>> main
 
     @property
     def dx(self):
@@ -168,7 +147,11 @@ class Simulation:
                 print("[Sim] Restart request received after completion.")
 
     def run_no_viz(self) -> None:
+<<<<<<< simulation
         self.data.push_frame(self.prim[0])  # Push initial density frame to data buffer
+=======
+        self.data.push_frame(self.prim)  # Push initial quantity frame to data buffer        
+>>>>>>> main
         self.cons = primitive_to_conserved(self.prim, self.gamma)
         self.cons = solve_euler_2d(
             U0=self.cons,
@@ -180,7 +163,10 @@ class Simulation:
             dt=self.dt,
         )
         self.prim = conserved_to_primitive(self.cons, self.gamma)
+<<<<<<< simulation
         # raise NotImplementedError("[Sim] Simulation.run is not implemented yet.")
+=======
+>>>>>>> main
 
     def run_mock(self) -> None:
         """Feed frames into the buffer at a fixed rate (sim_fps), and eventually get paused/unpaused."""
@@ -188,21 +174,37 @@ class Simulation:
         self.sim_file = self.args.sim_file
         sim = np.load(self.sim_file)
         self.sim_size: int = sim.shape[2]
+<<<<<<< simulation
         print(
             f"[Sim] Loaded mock simulation from {self.sim_file} with {sim.shape[0]} frames of linear size {sim.shape[2]}."
         )
         print(
             f"[Sim] Simulation initialized in fake_injection mode. Injecting the buffer at {self.sim_fps} FPS."
         )
+=======
 
-        while True:
-            self.data.reset_buffer()
-            dt = 1.0 / self.sim_fps  # seconds per frame of mock injection
-            t_next = time.perf_counter() + dt  # time of the next frame to push
+        # set spatial coordinates
+        self.xmin: float = 0.0
+        self.xmax: float = 1.0
+        self.ymin: float = 0.0
+        self.ymax: float = 1.0
+        x = jnp.linspace(self.xmin, self.xmax, num=self.args.sim_size)
+        y = jnp.linspace(self.ymin, self.ymax, num=self.args.sim_size)
+        self.coords = (x, y) # spatial coordinates
+        self.data.coords = self.coords # push to data
 
-            now0 = time.perf_counter()
-            self._seen_sim_cmd_version = self._get_sim_cmd_version()
-            self._reset_rate_measurement(now0)
+        print(f"[Sim] Loaded mock simulation from {self.sim_file} with {sim.shape[0]} frames of linear size {sim.shape[2]}.")
+        print(f"[Sim] Simulation initialized in fake_injection mode. Injecting the buffer at {self.sim_fps} FPS.")
+>>>>>>> main
+
+        dt = 1.0 / self.sim_fps  # seconds per frame of the mock simulation injection
+        t_next = time.perf_counter() + dt  # time of the next frame to push (cumulative)
+
+        now0 = time.perf_counter()  # starting time t0
+        self._seen_sim_cmd_version = (
+            self._get_sim_cmd_version()
+        )  # same command state at start
+        self._reset_rate_measurement(now0)
 
             # reporting
             report_every_s = 1.0
