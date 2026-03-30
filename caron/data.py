@@ -3,6 +3,7 @@ from collections import deque
 from argparse import Namespace
 import numpy as np
 import threading
+from typing import Any, Iterable
 
 
 @dataclass
@@ -54,6 +55,18 @@ class Data:
             self._apply_safe_control_sim() # Apply control logic based on new buffer size
             self.cond.notify_all()
             return frame
+
+    def reset_buffer(self, frames: Iterable[Any] | None = None) -> None:
+        """Clear and optionally refill the shared buffer, then resume simulation."""
+        with self.cond:
+            self.buffer.clear()
+            if frames is not None:
+                for item in frames:
+                    self.buffer.append(item)
+            self.sim_finished = False
+            self._set_sim_paused_locked(False)
+            self._apply_safe_control_sim()
+            self.cond.notify_all()
         
 
     # Control logic

@@ -1,17 +1,15 @@
 """Simulation class producing data for the visualization."""
 
 # imports
-from matplotlib.pylab import gamma
 from caron.data import Data
 import numpy as np
 import time
 from collections import deque
 import threading
-from typing import Any
 import jax.numpy as jnp
 from caron.physics import primitive_to_conserved, conserved_to_primitive
 from caron.solver import advance_step, solve_euler_2d
-from jax import jit
+from caron.initial_conditions import load_initial_condition
 
 
 class Simulation:
@@ -23,6 +21,10 @@ class Simulation:
         self.args = args
         self.data = data
         self.sim_size: int = self.args.sim_size
+        self.init_name: str = str(
+            init if init is not None else getattr(self.args, "init", "riemann_2d")
+        )
+        self._restart_event = threading.Event()
 
         # Rolling window for FPS measurement
         self.timestamps = deque()
@@ -41,41 +43,62 @@ class Simulation:
             0  # in overflow, the bump changes this value and resets the avg measurement
         )
 
-        if init is None:
-            self.import_init()
+        self.import_init(self.init_name)
 
-    def import_init(self) -> None:
-        """Imports the initial conditions. Right now a 2D Sod shock tube is initialized, later more options will be added."""
+    def import_init(self, init_name: str | None = None) -> None:
+        """Load one named initial-condition preset from the registry."""
+        if init_name is not None:
+            self.init_name = str(init_name)
+        init_data = load_initial_condition(self.init_name, self.args)
 
-        # Numerical parameters
-        self.nx: int = 400
-        self.ny: int = 400  # ny = 1 => effectively 1D
-        self.t_end: float = 0.2
-        self.dt = 0.001
-        self.gamma: float = 1.4
-        self.CFL: float = 0.8
-
-        # Domain
-        self.xmin: float = 0.0
-        self.xmax: float = 1.0
-        self.ymin: float = 0.0
-        self.ymax: float = 1.0
-
-        x0 = 0.5 * (self.xmin + self.xmax)
-
-        x = jnp.linspace(self.xmin, self.xmax, num=self.nx)
-        y = jnp.linspace(self.ymin, self.ymax, num=self.ny)
-        X, _ = jnp.meshgrid(x, y, indexing="ij")
-
-        rho = jnp.where(X < x0, 1.0, 0.125)
-        prs = jnp.where(X < x0, 1.0, 0.1)
-
-        # 3 velocity components: vx, vy, vz
-        vel = jnp.zeros((3, self.nx, self.ny))
-
-        self.coords = (x, y)
-        self.prim = jnp.concatenate([rho[None, ...], vel, prs[None, ...]], axis=0)
+        self.nx = int(init_data["nx"])
+        self.ny = int(init_data["ny"])
+        self.t_end = float(init_data["t_end"])
+        self.dt = float(init_data["dt"])
+        self.gamma = float(init_data["gamma"])
+        self.CFL = float(init_data["CFL"])
+        self.bc_x = str(init_data["bc_x"])
+        self.bc_y = str(init_data["bc_y"])
+        self.xmin = float(init_data["xmin"])
+        self.xmax = float(init_data["xmax"])
+        self.ymin = float(init_data["ymin"])
+        self.ymax = float(init_data["ymax"])
+        self.coords = init_data["coords"]
+        self.initial_prim = init_data["prim"]
+        self.prim = self.initial_prim
         self.data.coords = self.coords
+
+    def get_initial_frame_tuple(self) -> tuple[np.ndarray, float]:
+        return (np.array(self.initial_prim), 0.0)
+
+    def _stable_dt(self) -> float:
+        """Compute a CFL-safe time step and cap it by the configured dt."""
+        prim = np.array(self.prim)
+        rho = prim[0]
+        vx = prim[1]
+        vy = prim[2]
+        prs = prim[4]
+
+        rho_safe = np.maximum(rho, 1e-12)
+        prs_safe = np.maximum(prs, 1e-12)
+        cs = np.sqrt(self.gamma * prs_safe / rho_safe)
+
+        smax_x = float(np.max(np.abs(vx) + cs))
+        smax_y = float(np.max(np.abs(vy) + cs))
+
+        inv_dt = (smax_x / max(self.dx, 1e-12)) + (smax_y / max(self.dy, 1e-12))
+        if inv_dt <= 1e-12:
+            return float(self.dt)
+        return float(min(self.dt, self.CFL / inv_dt))
+
+    def request_restart(self) -> None:
+        self._restart_event.set()
+
+    def _consume_restart_request(self) -> bool:
+        if self._restart_event.is_set():
+            self._restart_event.clear()
+            return True
+        return False
 
     @property
     def dx(self):
@@ -96,18 +119,53 @@ class Simulation:
     # Runs
     # ----------------------------------------------------------------------
     def run(self) -> None:
-        self.data.push_frame(self.prim)  # Push initial density frame to data buffer
-        self.cons = primitive_to_conserved(self.prim, self.gamma)
-        t, step = 0.0, 0
-        while t < self.t_end:
-            dt = float(min(self.dt, self.t_end - t))  # to keep the Python loop happy
-            self.cons = advance_step(self.cons, dt, self.dx, self.dy, self.gamma)
-            t += dt
-            step += 1
-            self.prim = conserved_to_primitive(self.cons, self.gamma)
-            self.data.push_frame(self.prim)
+        while True:
+            self.prim = self.initial_prim
+            self.data.reset_buffer([self.get_initial_frame_tuple()])
 
-        self.prim = conserved_to_primitive(self.cons, self.gamma)
+            now = time.perf_counter()
+            self._reset_rate_measurement(now)
+            self._rate_tick_frame_pushed(time.perf_counter())
+
+            self.cons = primitive_to_conserved(self.prim, self.gamma)
+            t, step = 0.0, 0
+            restart_requested = False
+            while t < self.t_end:
+                if self._consume_restart_request():
+                    restart_requested = True
+                    break
+                self.data.wait_if_sim_paused()  # respect overflow pause commands from Data
+                if self._consume_restart_request():
+                    restart_requested = True
+                    break
+
+                dt = float(min(self._stable_dt(), self.t_end - t))
+                self.cons = advance_step(
+                    self.cons, dt, self.dx, self.dy, self.gamma, self.bc_x, self.bc_y
+                )
+                t += dt
+                step += 1
+                self.prim = conserved_to_primitive(self.cons, self.gamma)
+                frame = np.array(self.prim)
+                if not np.isfinite(frame).all():
+                    print(
+                        f"[Sim] NaN/Inf detected at t={t:.4f} (step {step}): simulation unstable, stopping."
+                    )
+                    break
+                self.data.push_frame((frame, t))  # (frame, sim_time) tuple
+                self._rate_tick_frame_pushed(time.perf_counter())
+
+            if restart_requested:
+                if self.args.verbose:
+                    print("[Sim] Restart requested. Resetting simulation to t=0.")
+                continue
+
+            self.data.sim_finished = True
+            print("[Sim] Simulation finished pushing frames.")
+            self._restart_event.wait()
+            self._restart_event.clear()
+            if self.args.verbose:
+                print("[Sim] Restart request received after completion.")
 
     def run_no_viz(self) -> None:
         self.data.push_frame(self.prim[0])  # Push initial density frame to data buffer
@@ -137,75 +195,74 @@ class Simulation:
             f"[Sim] Simulation initialized in fake_injection mode. Injecting the buffer at {self.sim_fps} FPS."
         )
 
-        dt = 1.0 / self.sim_fps  # seconds per frame of the mock simulation injection
-        t_next = time.perf_counter() + dt  # time of the next frame to push (cumulative)
+        while True:
+            self.data.reset_buffer()
+            dt = 1.0 / self.sim_fps  # seconds per frame of mock injection
+            t_next = time.perf_counter() + dt  # time of the next frame to push
 
-        now0 = time.perf_counter()  # starting time t0
-        self._seen_sim_cmd_version = (
-            self._get_sim_cmd_version()
-        )  # same command state at start
-        self._reset_rate_measurement(now0)
+            now0 = time.perf_counter()
+            self._seen_sim_cmd_version = self._get_sim_cmd_version()
+            self._reset_rate_measurement(now0)
 
-        # reporting
-        report_every_s = 1.0
-        last_report_t = time.perf_counter()
-        last_report_pushed = 0
-        pushed = 0  # number of pushed frames, for the average fps computation
+            # reporting
+            report_every_s = 1.0
+            last_report_t = time.perf_counter()
+            last_report_pushed = 0
+            pushed = 0
+            restart_requested = False
 
-        for frame in sim:
-            now = time.perf_counter()
-            if self.args.verbose:
-                print(f"[Sim] Starting frame pushing at {now}")
-            self._sync_sim_command_from_data(
-                now
-            )  # react to Data pause/unpause command and reset avg window if changed
+            for frame in sim:
+                if self._consume_restart_request():
+                    restart_requested = True
+                    break
 
-            if (
-                self._is_sim_paused()
-            ):  # if paused, close active segment and wait until unpaused
-                self._rate_on_pause(now)
-                self.data.wait_if_sim_paused()
                 now = time.perf_counter()
-                self._rate_on_resume(now)  # resume segment after pause
-                t_next = now + dt  # restart schedule cleanly, not immediately
-
-            now = time.perf_counter()  # start timing
-            if now < t_next:
-                time.sleep(
-                    t_next - now
-                )  # is this appropriate? Maybe we should take a statistical approach as in the visualizer? To be checked
-
-            self.data.push_frame(frame)
-            t_push = time.perf_counter()  # time of push completion
-            if self.args.verbose:
-                print(f"[Sim] Finalized frame pushing at {t_push}")
-
-            self._rate_tick_frame_pushed(t_push)  # timestamp after the frame is pushed
-            pushed += 1
-
-            t_next += dt
-            if (
-                t_push > t_next + dt
-            ):  # the cumulative drift correction: if we're behind, catch up
-                t_next = t_push + dt
-
-            # periodic report
-            if (t_push - last_report_t) >= report_every_s:
-                inst_fps = (pushed - last_report_pushed) / (
-                    t_push - last_report_t
-                )  # instantaneous fps over the last interval
-                avg_fps = (
-                    self.get_measured_fps()
-                )  # average fps in this unpaused segment
                 if self.args.verbose:
-                    print(
-                        f"[Sim] pushed={pushed}/{sim.shape[0]} | buffer={len(self.data)} | inst≈{inst_fps:.2f} Hz | avg≈{avg_fps:.2f} Hz"
-                    )
-                last_report_t = t_push
-                last_report_pushed = pushed
+                    print(f"[Sim] Starting frame pushing at {now}")
+                self._sync_sim_command_from_data(now)
 
-        self.data.sim_finished = True
-        print("[Sim] Simulation finished pushing frames.")
+                if self._is_sim_paused():
+                    self._rate_on_pause(now)
+                    self.data.wait_if_sim_paused()
+                    now = time.perf_counter()
+                    self._rate_on_resume(now)
+                    t_next = now + dt
+
+                now = time.perf_counter()
+                if now < t_next:
+                    time.sleep(t_next - now)
+
+                self.data.push_frame(frame)
+                t_push = time.perf_counter()
+                if self.args.verbose:
+                    print(f"[Sim] Finalized frame pushing at {t_push}")
+
+                self._rate_tick_frame_pushed(t_push)
+                pushed += 1
+
+                t_next += dt
+                if t_push > t_next + dt:
+                    t_next = t_push + dt
+
+                if (t_push - last_report_t) >= report_every_s:
+                    inst_fps = (pushed - last_report_pushed) / (t_push - last_report_t)
+                    avg_fps = self.get_measured_fps()
+                    if self.args.verbose:
+                        print(
+                            f"[Sim] pushed={pushed}/{sim.shape[0]} | buffer={len(self.data)} | inst≈{inst_fps:.2f} Hz | avg≈{avg_fps:.2f} Hz"
+                        )
+                    last_report_t = t_push
+                    last_report_pushed = pushed
+
+            if restart_requested:
+                if self.args.verbose:
+                    print("[Sim] Restart requested. Restarting mock injection from frame 0.")
+                continue
+
+            self.data.sim_finished = True
+            print("[Sim] Simulation finished pushing frames.")
+            self._restart_event.wait()
+            self._restart_event.clear()
 
     # Command getters (called by Data)
     # ------------------------------------------------------------------
