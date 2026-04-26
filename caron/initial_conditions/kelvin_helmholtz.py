@@ -42,4 +42,5 @@ def make_initial_condition(args: object) -> dict:
         "ymax": ymax,
         "coords": (x, y),
         "prim": prim,
+        "quantities": ["Density", "vx", "vy", "vz", "Pressure"],
     }

@@ -19,17 +19,13 @@ class Data:
     max_viz_fps: float =120.0 # maximum allowed viz fps during balancing, in the beginning. It is updated later by the visualizer after calibration (also setting the slider maximum)
     viz_margin:float = 5.0 # [frames] margin before pausing/resuming the simulation
     viz_margin_fps: float = 5.0  # keep viz slightly slower than sim when starving
-    pillow:int = 5 # [frames] thin boundary region to avoid rapid pause/resume cycles
+    pillow:int = 30 # [frames] hysteresis window to avoid rapid pause/resume cycles (~10% of default buffer_safe_max)
     viz_cmd_version: int = 0 # becomes 1 when fps changes
     sim_cmd_version: int = 0
     sim_paused: bool = False
     sim_finished: bool=False
-    coords: tuple = field(init = False, repr = False) # to be set later
+    coords: tuple | None = field(init=False, repr=False, default=None)
 
-    def __post_init__(self) -> None:
-        self.buffer: deque = deque(maxlen=self.maxlen)
-        self.quantities: list[str] = ["West", "Nort", "East", "South"]
-    
     def __post_init__(self) -> None:
         self.quantities: list[str] = []  # pushed by simulation before viz starts
         self.buffer: deque = deque(maxlen=self.maxlen)
@@ -120,6 +116,11 @@ class Data:
                         self._set_sim_paused_locked(False)
                     self._set_viz_target_fps_locked(new_viz)
                     self.cond.notify_all()
+            elif n >= self.buffer_safe_min and self.viz_target_fps < self.max_viz_fps:
+                new_viz = min(self.max_viz_fps, self.viz_target_fps + self.viz_margin_fps)
+                if new_viz - self.viz_target_fps > 1e-12:
+                    self._set_viz_target_fps_locked(new_viz)
+                    self.cond.notify_all()
 
 
     # Command getters (used by sim/viz)
@@ -139,6 +140,14 @@ class Data:
     def get_sim_cmd_version(self) -> int:
         with self.lock:
             return self.sim_cmd_version
+
+    def is_sim_finished(self) -> bool:
+        with self.lock:
+            return self.sim_finished
+
+    def set_sim_finished(self, value: bool) -> None:
+        with self.lock:
+            self.sim_finished = value
 
     def __len__(self) -> int:
         with self.lock:

@@ -23,7 +23,6 @@ class Main:
     def parse_args():
         parser = argparse.ArgumentParser(prog="Caron")
         parser.add_argument("--sim_size",type=int,default=512,help="Linear size of the simulation grid [Default: 512]")
-        parser.add_argument("--n_frames",type=int,default=200,help="Number of simulation frames [Default: 200]")
         parser.add_argument("--viz_fps",type=float,default=60,help="Starting visualisation FPS after calibration [Default: 60]")
         parser.add_argument("--max_display_px",type=int,default=400,help="Maximum display size in pixels (caps window size independently of sim resolution) [Default: 400]")
         parser.add_argument("--max_window_width",type=int,default=1400,help="Maximum viewport width in pixels [Default: 1400]")
@@ -38,7 +37,6 @@ class Main:
         parser.add_argument("--fake_sim_fps",type=int,default=60,help="Fake simulation injection fps, when --fake_injection is invoked [Default: 60Hz]")
         parser.add_argument("--ctrl_dt", type=float, default=0.2,help="Control loop tick interval in seconds [Default: 0.2s]")
         parser.add_argument("--verbose",action="store_true",help="Print verbose diagnostics")
-        parser.add_argument("--single_quantity",action="store_true",help="Use only a single quantity from the simulation")
         parser.add_argument(
             "--init",
             type=str,
@@ -73,10 +71,9 @@ class Main:
                 ctrl_thread.start()
 
                 # Wait until buffer reaches safe_min before starting viz
-                while len(self.data.buffer) < self.data.buffer_safe_min and not self.data.sim_finished:
-                while len(self.data) < self.data.buffer_safe_min:
+                while len(self.data) < self.data.buffer_safe_min and not self.data.is_sim_finished():
                     time.sleep(0.01)
-                if len(self.data.buffer) == 0:
+                if len(self.data) == 0:
                     print("[Main] Simulation ended before producing frames. GUI not started.")
                     return
                 if self.args.verbose:
@@ -91,9 +88,9 @@ class Main:
                 ctrl_thread.start()
 
                 # Wait until buffer reaches safe_min before starting viz
-                while len(self.data.buffer) < self.data.buffer_safe_min and not self.data.sim_finished:
+                while len(self.data) < self.data.buffer_safe_min and not self.data.is_sim_finished():
                     time.sleep(0.01)
-                if len(self.data.buffer) == 0:
+                if len(self.data) == 0:
                     print("[Main] Simulation ended before producing frames. GUI not started.")
                     return
                 if self.args.verbose:

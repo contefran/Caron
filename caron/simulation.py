@@ -35,10 +35,13 @@ class Simulation:
         self._seen_sim_cmd_version: int = (
             0  # in overflow, the bump changes this value and resets the avg measurement
         )
-        self.quantities = ["West", "Nort", "East", "South"]
-        self.data.quantities = self.quantities
-
-        self.import_init(self.init_name)
+        if args.fake_injection:
+            sim_peek = np.load(args.sim_file, mmap_mode='r')
+            n_ch = int(sim_peek.shape[1])
+            self.quantities = [f"Channel {i}" for i in range(n_ch)]
+            self.data.quantities = self.quantities
+        elif not args.no_sim:
+            self.import_init(self.init_name)
 
     def import_init(self, init_name: str | None = None) -> None:
         """Load one named initial-condition preset from the registry."""
@@ -62,6 +65,8 @@ class Simulation:
         self.initial_prim = init_data["prim"]
         self.prim = self.initial_prim
         self.data.coords = self.coords
+        self.quantities = list(init_data["quantities"])
+        self.data.quantities = self.quantities
 
     def get_initial_frame_tuple(self) -> tuple[np.ndarray, float]:
         return (np.array(self.initial_prim), 0.0)
@@ -94,9 +99,6 @@ class Simulation:
             self._restart_event.clear()
             return True
         return False
-        self.coords = (x, y)
-        self.prim = jnp.concatenate([rho[None, ...], vel, prs[None, ...]], axis=0)
-        self.data.coords = self.coords
 
 
     @property
@@ -159,7 +161,7 @@ class Simulation:
                     print("[Sim] Restart requested. Resetting simulation to t=0.")
                 continue
 
-            self.data.sim_finished = True
+            self.data.set_sim_finished(True)
             print("[Sim] Simulation finished pushing frames.")
             self._restart_event.wait()
             self._restart_event.clear()
@@ -167,7 +169,6 @@ class Simulation:
                 print("[Sim] Restart request received after completion.")
 
     def run_no_viz(self) -> None:
-        self.data.push_frame(self.prim[0])  # Push initial density frame to data buffer
         self.cons = primitive_to_conserved(self.prim, self.gamma)
         self.cons = solve_euler_2d(
             U0=self.cons,
@@ -179,7 +180,6 @@ class Simulation:
             dt=self.dt,
         )
         self.prim = conserved_to_primitive(self.cons, self.gamma)
-        # raise NotImplementedError("[Sim] Simulation.run is not implemented yet.")
 
     def run_mock(self) -> None:
         """Feed frames into the buffer at a fixed rate (sim_fps), and eventually get paused/unpaused."""
@@ -187,12 +187,8 @@ class Simulation:
         self.sim_file = self.args.sim_file
         sim = np.load(self.sim_file)
         self.sim_size: int = sim.shape[2]
-        print(
-            f"[Sim] Loaded mock simulation from {self.sim_file} with {sim.shape[0]} frames of linear size {sim.shape[2]}."
-        )
-        print(
-            f"[Sim] Simulation initialized in fake_injection mode. Injecting the buffer at {self.sim_fps} FPS."
-        )
+        print(f"[Sim] Loaded mock simulation from {self.sim_file} with {sim.shape[0]} frames of linear size {sim.shape[2]}.")
+        print(f"[Sim] Simulation initialized in fake_injection mode. Injecting the buffer at {self.sim_fps} FPS.")
 
         # set spatial coordinates
         self.xmin: float = 0.0
@@ -201,20 +197,8 @@ class Simulation:
         self.ymax: float = 1.0
         x = jnp.linspace(self.xmin, self.xmax, num=self.sim_size)
         y = jnp.linspace(self.ymin, self.ymax, num=self.sim_size)
-        self.coords = (x, y) # spatial coordinates
-        self.data.coords = self.coords # push to data
-
-        print(f"[Sim] Loaded mock simulation from {self.sim_file} with {sim.shape[0]} frames of linear size {sim.shape[2]}.")
-        print(f"[Sim] Simulation initialized in fake_injection mode. Injecting the buffer at {self.sim_fps} FPS.")
-
-        dt = 1.0 / self.sim_fps  # seconds per frame of the mock simulation injection
-        t_next = time.perf_counter() + dt  # time of the next frame to push (cumulative)
-
-        now0 = time.perf_counter()  # starting time t0
-        self._seen_sim_cmd_version = (
-            self._get_sim_cmd_version()
-        )  # same command state at start
-        self._reset_rate_measurement(now0)
+        self.coords = (x, y)
+        self.data.coords = self.coords
 
         while True:
             self.data.reset_buffer()
@@ -280,7 +264,7 @@ class Simulation:
                     print("[Sim] Restart requested. Restarting mock injection from frame 0.")
                 continue
 
-            self.data.sim_finished = True
+            self.data.set_sim_finished(True)
             print("[Sim] Simulation finished pushing frames.")
             self._restart_event.wait()
             self._restart_event.clear()
