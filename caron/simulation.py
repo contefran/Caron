@@ -1,17 +1,13 @@
 """Simulation class producing data for the visualization."""
 
 # imports
-from matplotlib.pylab import gamma
 from caron.data import Data
 import numpy as np
 import time
-from collections import deque
 import threading
-from typing import Any
 import jax.numpy as jnp
 from caron.physics import primitive_to_conserved, conserved_to_primitive
 from caron.solver import advance_step, solve_euler_2d
-from jax import jit
 
 
 class Simulation:
@@ -23,12 +19,6 @@ class Simulation:
         self.args = args
         self.data = data
         self.sim_size: int = self.args.sim_size
-
-        # Rolling window for FPS measurement
-        self.timestamps = deque()
-        self.window_s = 2.0  # seconds
-        self.lock = threading.Lock()
-        self.cond = threading.Condition()
 
         self._rate_lock = threading.Lock()
         self._rate_active_start: float | None = (
@@ -142,8 +132,8 @@ class Simulation:
         self.xmax: float = 1.0
         self.ymin: float = 0.0
         self.ymax: float = 1.0
-        x = jnp.linspace(self.xmin, self.xmax, num=self.args.sim_size)
-        y = jnp.linspace(self.ymin, self.ymax, num=self.args.sim_size)
+        x = jnp.linspace(self.xmin, self.xmax, num=self.sim_size)
+        y = jnp.linspace(self.ymin, self.ymax, num=self.sim_size)
         self.coords = (x, y) # spatial coordinates
         self.data.coords = self.coords # push to data
 
@@ -268,16 +258,10 @@ class Simulation:
     # Internal functions to handle pauses
     # ------------------------------------------------------------------
     def _is_sim_paused(self) -> bool:
-        try:
-            return bool(self.data.is_sim_paused())
-        except Exception:
-            return bool(getattr(self.data, "sim_paused", False))
+        return self.data.is_sim_paused()
 
     def _get_sim_cmd_version(self) -> int:
-        try:
-            return int(self.data.get_sim_cmd_version())
-        except Exception:
-            return int(getattr(self.data, "sim_cmd_version", 0))
+        return self.data.get_sim_cmd_version()
 
     def _sync_sim_command_from_data(self, now: float) -> None:
         """If Data issued a new sim command (pause/unpause), reset avg-fps window."""

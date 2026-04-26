@@ -4,3 +4,4 @@ mock_sim.npy
 .vscode/*
 caron/frames/*
 caron/__pycache__/*
+CLAUDE.md
