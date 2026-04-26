@@ -5,6 +5,7 @@ import time
 from caron.data import Data
 from caron.simulation import Simulation
 from caron.visualization import Visualization
+from caron.initial_conditions import available_initial_conditions
 
 
 class Main:
@@ -15,13 +16,18 @@ class Main:
     def __init__(self):
         self.args = self.parse_args()
         self.data = Data(args=self.args)
-        self.sim = Simulation(data=self.data,args=self.args)
-        self.viz = Visualization(data=self.data,args=self.args)
+        self.sim = Simulation(data=self.data, args=self.args, init=self.args.init)
+        self.viz = Visualization(data=self.data, args=self.args, sim=self.sim)
 
     @staticmethod
     def parse_args():
         parser = argparse.ArgumentParser(prog="Caron")
         parser.add_argument("--sim_size",type=int,default=512,help="Linear size of the simulation grid [Default: 512]")
+        parser.add_argument("--n_frames",type=int,default=200,help="Number of simulation frames [Default: 200]")
+        parser.add_argument("--viz_fps",type=float,default=60,help="Starting visualisation FPS after calibration [Default: 60]")
+        parser.add_argument("--max_display_px",type=int,default=400,help="Maximum display size in pixels (caps window size independently of sim resolution) [Default: 400]")
+        parser.add_argument("--max_window_width",type=int,default=1400,help="Maximum viewport width in pixels [Default: 1400]")
+        parser.add_argument("--max_window_height",type=int,default=1000,help="Maximum viewport height in pixels [Default: 1000]")
         parser.add_argument("--calib_time",type=float,default=3,help="FPS calibration time in seconds [Default: 3s]")
         parser.add_argument("--calib_frames",type=int,default=50,help="Minimum number of frames for FPS calibration [Default: 50 frames]")
         parser.add_argument("--buffer_safe_max",type=int,default=300,help="Maximum number of frames in the buffer before activating overflow [Default: 300 frames]")
@@ -32,6 +38,14 @@ class Main:
         parser.add_argument("--fake_sim_fps",type=int,default=60,help="Fake simulation injection fps, when --fake_injection is invoked [Default: 60Hz]")
         parser.add_argument("--ctrl_dt", type=float, default=0.2,help="Control loop tick interval in seconds [Default: 0.2s]")
         parser.add_argument("--verbose",action="store_true",help="Print verbose diagnostics")
+        parser.add_argument("--single_quantity",action="store_true",help="Use only a single quantity from the simulation")
+        parser.add_argument(
+            "--init",
+            type=str,
+            default="sod_shock",
+            choices=available_initial_conditions(),
+            help="Initial condition preset to load.",
+        )
         return parser.parse_args()
 
 
@@ -59,13 +73,32 @@ class Main:
                 ctrl_thread.start()
 
                 # Wait until buffer reaches safe_min before starting viz
+                while len(self.data.buffer) < self.data.buffer_safe_min and not self.data.sim_finished:
                 while len(self.data) < self.data.buffer_safe_min:
                     time.sleep(0.01)
+                if len(self.data.buffer) == 0:
+                    print("[Main] Simulation ended before producing frames. GUI not started.")
+                    return
                 if self.args.verbose:
                     print(f"[Main] Buffer reached size {len(self.data)}: starting visualization.")
                 self.viz.run() # now start the visualization
             else:
-                raise NotImplementedError("[Main] Main.run: real simulation + visualization not implemented yet.")
+                print("[Main] Running real simulation + visualization.")
+                sim_thread = threading.Thread(target=self.sim.run, daemon=True)
+                sim_thread.start()
+
+                ctrl_thread = threading.Thread(target=self._control_loop, args=(self.args.ctrl_dt,), daemon=True)
+                ctrl_thread.start()
+
+                # Wait until buffer reaches safe_min before starting viz
+                while len(self.data.buffer) < self.data.buffer_safe_min and not self.data.sim_finished:
+                    time.sleep(0.01)
+                if len(self.data.buffer) == 0:
+                    print("[Main] Simulation ended before producing frames. GUI not started.")
+                    return
+                if self.args.verbose:
+                    print(f"[Main] Buffer reached size {len(self.data)}: starting visualization.")
+                self.viz.run()
 
 
     # Thread to monitor the buffer

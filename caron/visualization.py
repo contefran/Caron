@@ -8,6 +8,15 @@ from caron.data import Data
 
 
 @njit
+def normalize_frame(frame, vmin, vmax):
+    norm = (frame - vmin) / (vmax - vmin + 1e-8)
+    for i in range(norm.shape[0]):
+        for j in range(norm.shape[1]):
+            if norm[i, j] < 0:
+                norm[i, j] = 0.0
+            elif norm[i, j] > 1.0:
+                norm[i, j] = 1.0
+    return norm
 def normalize_frame(frame):
     frame_min = np.min(frame)
     frame_max = np.max(frame)
@@ -27,19 +36,21 @@ class Visualization:
 
     # Initialization
     # ------------------------------------------------------------------
-    def __init__(self, data:Data, args) -> None:
+    def __init__(self, data:Data, args, sim=None) -> None:
         self.data = data # this is the first buffer, obtained after a few seconds of simulation
         self.args = args
+        self.sim = sim
         self.frames = self.data.buffer
+        self.no_sim_source_frames: list[np.ndarray] = []
         if self.args.no_sim:
             frames_array = np.load(self.args.sim_file)
+            self.no_sim_source_frames = [np.array(frame) for frame in frames_array]
             for frame in frames_array:
                 self.data.push_frame(frame) # fill the buffer with the mock sim. It's a deque
 
-        # Simulation size
-        self.sim_size = self.args.sim_size
-        if self.args.no_sim:
-            self.sim_size: int = self.frames[0].shape[1]
+        # Simulation shape (supports rectangular grids nx != ny)
+        self.sim_nx = int(self.args.sim_size)
+        self.sim_ny = int(self.args.sim_size)
 
         # Status and main vars
         self.finished: bool = False
@@ -94,10 +105,52 @@ class Visualization:
         self.cmap_list_tag = "Caron Colormaps List"
         self.quantity_tag = "Caron Quantities List"
         self.log_strength_tag = "Caron Log Strength Slider"
+        self.restart_tag = "Caron Restart Button"
         self.texture_tag = "frame_tag"
+        self.main_window_tag = "Caron Main Window"
         self.log_scale: bool = False
+        self.log_alpha: float = 50.0 # compression log strength
+        self.log_map = build_log_map(self.log_alpha) # basically mapping the log scale once on a 1D array
+
+        # Simulation time display
+        self.sim_time_tag = "Caron Sim Time"
+
+        # Colorscale limits
+        self.clim_auto: bool = True
+        self.clim_vmin: float = 0.0
+        self.clim_vmax: float = 1.0
+        self.clim_auto_tag = "Caron Clim Auto"
+        self.clim_min_tag  = "Caron Clim Min"
+        self.clim_max_tag  = "Caron Clim Max"
+
+       # DearPyGui tags
+        #self._font_tag: str = "big_font"
         self.log_alpha: float = 50.0
         self.log_map = build_log_map(self.log_alpha)
+
+    def _compute_layout_size(self, sim_nx: int, sim_ny: int) -> tuple[int, int, int, int]:
+        """
+        Return (image_w, image_h, window_width, window_height) fitted to max dimensions.
+        Keeps aspect ratio for rectangular fields.
+        """
+        max_w = int(getattr(self.args, "max_window_width", 1400))
+        max_h = int(getattr(self.args, "max_window_height", 1000))
+        cap_img = int(self.args.max_display_px)
+
+        # Initial estimate only; final size is tightened to real content later.
+        side_panel_w = 170.0
+        horiz_pad = 70.0
+        vert_pad = 120.0
+
+        max_img_w = max(120.0, min(float(cap_img), float(max_w) - side_panel_w - horiz_pad))
+        max_img_h = max(120.0, min(float(cap_img), float(max_h) - vert_pad))
+        scale = min(max_img_w / max(float(sim_nx), 1.0), max_img_h / max(float(sim_ny), 1.0))
+
+        image_w = max(120, int(round(sim_nx * scale)))
+        image_h = max(120, int(round(sim_ny * scale)))
+        win_w = int(round(image_w + side_panel_w + horiz_pad))
+        win_h = int(round(image_h + vert_pad))
+        return image_w, image_h, win_w, win_h
 
 
     # Run
@@ -108,10 +161,15 @@ class Visualization:
         if not self.frames:
             raise RuntimeError("[Viz] Visualization initialised with an empty buffer.")
         if self.args.verbose:
-            print(f"[Viz] Loaded a simulation of size {self.sim_size}x{self.sim_size} with {len(self.frames)} frames as initial buffering.")
+            print(f"[Viz] Loaded a simulation with {len(self.frames)} frames as initial buffering.")
 
         # Precompute first frame to initialise the texture
-        frame = self.frames[0][self.viz_quantity_index] # still works with deque, I'm already in love
+        first = self.frames[0]
+        first_frame = first[0] if isinstance(first, tuple) else first  # unwrap (frame, t) if needed
+        frame = first_frame[self.viz_quantity_index]
+        self.sim_nx = int(frame.shape[0])
+        self.sim_ny = int(frame.shape[1])
+        image_w, image_h, window_width, window_height = self._compute_layout_size(self.sim_nx, self.sim_ny)
         frame_min = np.min(frame)
         frame_max = np.max(frame)
         frame_norm = (frame - frame_min) / (frame_max - frame_min)
@@ -123,8 +181,8 @@ class Visualization:
 
         with dpg.texture_registry():
             dpg.add_raw_texture(
-                int(self.sim_size),
-                int(self.sim_size),
+                int(self.sim_nx),    # texture must match actual frame resolution
+                int(self.sim_ny),
                 default_value=self.frame_flattened.tolist(),
                 format=dpg.mvFormat_Float_rgb,
                 tag=self.texture_tag,
@@ -132,9 +190,10 @@ class Visualization:
 
         # Window / layout
         with dpg.window(
+            tag=self.main_window_tag,
             label="Jet Inspector",
-            width=int(self.sim_size * 2.6),
-            height=int(self.sim_size* 2.3),
+            width=window_width,
+            height=window_height,
             no_close=True,
             no_move=True,
             no_resize=False,
@@ -144,8 +203,7 @@ class Visualization:
                     dpg.add_slider_int(
                         label="Speed (FPS)",
                         tag=self.slider_tag,
-                        width=int(self.sim_size*1.9),
-                        #height=int(self.sim_size*1),
+                        width=int(image_w),
                         default_value=int(self.fps),
                         min_value=1,
                         max_value=int(self.data.max_viz_fps),
@@ -155,13 +213,13 @@ class Visualization:
                     )
                 with dpg.group(label="Map & Keys", horizontal=True): # below there is the image and the buttons
                     with dpg.group(label='Colormap & Color Combo'): # image and color listbox on the left
-                        dpg.add_image(texture_tag=self.texture_tag, width = int(self.sim_size *1.9), height= int(self.sim_size *1.9)) 
+                        dpg.add_image(texture_tag=self.texture_tag, width=int(image_w), height=int(image_h))
                         with dpg.group(label="Log visualization", horizontal=True):
                             dpg.add_combo(
                                 tag=self.cmap_list_tag,
                                 items=self.cmap_names,
                                 default_value=self.current_cmap,
-                                width=int(self.sim_size * 0.2),
+                                width=max(100, int(image_w * 0.35)),
                                 callback=_colormap_callback,
                                 user_data=self,
                             )
@@ -169,9 +227,37 @@ class Visualization:
                                 tag=self.quantity_tag,
                                 items=self.quantities,
                                 default_value=self.viz_quantity,
-                                width=int(self.sim_size * 0.2),
+                                width=max(100, int(image_w * 0.35)),
                                 callback=_quantity_callback,
                                 user_data=self,
+                            )
+                        with dpg.group(label="Colorscale", horizontal=True):
+                            dpg.add_checkbox(
+                                label="Auto",
+                                tag=self.clim_auto_tag,
+                                default_value=self.clim_auto,
+                                callback=_clim_auto_callback,
+                                user_data=self,
+                            )
+                            dpg.add_input_float(
+                                label="Min",
+                                tag=self.clim_min_tag,
+                                default_value=self.clim_vmin,
+                                width=max(120, int(image_w * 0.4)),
+                                enabled=False,
+                                callback=_clim_min_callback,
+                                user_data=self,
+                                step=0,
+                            )
+                            dpg.add_input_float(
+                                label="Max",
+                                tag=self.clim_max_tag,
+                                default_value=self.clim_vmax,
+                                width=max(120, int(image_w * 0.4)),
+                                enabled=False,
+                                callback=_clim_max_callback,
+                                user_data=self,
+                                step=0,
                             )
                         with dpg.group(label="Log visualization", horizontal=True):
                             dpg.add_slider_float(
@@ -182,7 +268,7 @@ class Visualization:
                                 format="%.1f",
                                 callback=_log_strength_callback,
                                 user_data=self,
-                                width=int(self.sim_size * 1.8),
+                                width=max(220, int(image_w * 0.95)),
                                 enabled=False,
                             )
                             dpg.add_checkbox(
@@ -196,21 +282,30 @@ class Visualization:
                             label="Start",
                             callback=_start_callback,
                             user_data=self,
-                            width=int(self.sim_size*0.3),
-                            height=int(self.sim_size*0.15),
+                            width=140,
+                            height=44,
                         )
                         dpg.add_button( # the stop button below
                             label="Stop",
                             callback=_stop_callback,
                             user_data=self,
-                            width=int(self.sim_size*0.3),
-                            height=int(self.sim_size*0.15),
+                            width=140,
+                            height=44,
                         )
+                        dpg.add_button(
+                            label="Restart",
+                            tag=self.restart_tag,
+                            callback=_restart_callback,
+                            user_data=self,
+                            width=140,
+                            height=44,
+                        )
+                        dpg.add_text("t = -.----", tag=self.sim_time_tag)
 
         dpg.create_viewport(
             title="Our lovely Caron",
-            width=int(self.sim_size * 2.6),
-            height=int(self.sim_size* 2.3),
+            width=window_width,
+            height=window_height,
         )
 
         dpg.setup_dearpygui()
@@ -233,7 +328,7 @@ class Visualization:
     
     # Internal functions to calculate the average fps
     # ------------------------------------------------------------------
-    def _reset_rate_measurement(self, now: float) -> None:
+    def _reset_rate_measurement(self, _now: float) -> None:
         """Reset the averaging window (required when FPS changes forcibly)."""
         with self._rate_lock:
             self._rate_active_time = 0.0
@@ -293,7 +388,7 @@ class Visualization:
 
 # Callbacks (operate via user_data)
 # ----------------------------------------------------------------------
-def _start_callback(sender, app_data, user_data: Visualization):
+def _start_callback(_sender, _app_data, user_data: Visualization):
     "Start button"
     user_data.running = True
     now = time.perf_counter()
@@ -306,7 +401,7 @@ def _start_callback(sender, app_data, user_data: Visualization):
         user_data._rate_on_start(now) # start/resume the avg fps measurement. It should be done after calibration
         user_data._next_due_time = now # Normal mode: align schedule so next update can happen promptly
 
-def _stop_callback(sender, app_data, user_data: Visualization):
+def _stop_callback(_sender, _app_data, user_data: Visualization):
     "Stop button"
     user_data.running = False
     now = time.perf_counter()
@@ -315,7 +410,37 @@ def _stop_callback(sender, app_data, user_data: Visualization):
         user_data.calib_active_time += now - user_data.calib_active_start # add the interval between start and stop to the active time
         user_data.calib_active_start = None
 
-def _fps_callback(sender, app_data, user_data: Visualization):
+def _restart_callback(_sender, _app_data, user_data: Visualization):
+    """Reset visualization and simulation streams to t=0."""
+    now = time.perf_counter()
+    user_data.running = False
+    user_data._rate_on_stop(now)
+    user_data._reset_rate_measurement(now)
+    user_data.frame_index = 0
+    user_data.last_update_time = now
+
+    first_frame = None
+    if user_data.args.no_sim:
+        if user_data.no_sim_source_frames:
+            user_data.data.reset_buffer(user_data.no_sim_source_frames)
+            first_frame = user_data.no_sim_source_frames[0]
+    else:
+        if user_data.sim is not None:
+            initial_item = user_data.sim.get_initial_frame_tuple()
+            user_data.data.reset_buffer([initial_item])
+            first_frame = initial_item[0]
+            user_data.sim.request_restart()
+
+    if first_frame is not None:
+        user_data._last_frame = first_frame
+        _render_frame(user_data, first_frame)
+    dpg.set_value(user_data.sim_time_tag, "t = 0.0000")
+
+    user_data.running = True
+    user_data._rate_on_start(time.perf_counter())
+    user_data._next_due_time = time.perf_counter()
+
+def _fps_callback(_sender, app_data, user_data: Visualization):
     """For add_slider_int, app_data is the slider value"""
     if user_data._programmatic_slider_update:
         return
@@ -325,7 +450,7 @@ def _fps_callback(sender, app_data, user_data: Visualization):
     user_data._next_due_time = now + user_data._frame_period  # re-align schedule
     user_data._reset_rate_measurement(now)
 
-def _colormap_callback(sender, app_data, user_data: Visualization):
+def _colormap_callback(_sender, app_data, user_data: Visualization):
     """For add_combo, app_data is the selected string"""
     name = str(app_data)  # selected map
     if name in user_data.luts:
@@ -333,6 +458,14 @@ def _colormap_callback(sender, app_data, user_data: Visualization):
         user_data.current_lut = user_data.luts[name]
     _refresh_current_frame(user_data)
 
+def _quantity_callback(_sender, app_data, user_data: Visualization):
+    """For XXX app_data is the selected quantity name -- but for the moment it's the index"""
+    user_data.viz_quantity = str(app_data) # e.g. Density
+    user_data.viz_quantity_index = [i for (i,q) in enumerate(user_data.quantities) if q==user_data.viz_quantity][0] # corresponding index
+    _refresh_current_frame(user_data)
+
+def _log_checkbox_callback(_sender, app_data, user_data: Visualization):
+    "Log button"
 def _quantity_callback(sender, app_data, user_data: Visualization):
     user_data.viz_quantity = str(app_data)
     user_data.viz_quantity_index = user_data.quantities.index(app_data)
@@ -343,17 +476,47 @@ def _log_checkbox_callback(sender, app_data, user_data: Visualization):
     dpg.configure_item(user_data.log_strength_tag, enabled=bool(app_data))
     _refresh_current_frame(user_data)
 
-def _log_strength_callback(sender, app_data, user_data: Visualization):
+def _log_strength_callback(_sender, app_data, user_data: Visualization):
     "Log slider"
     user_data.log_alpha = float(app_data)
     user_data.log_map = build_log_map(user_data.log_alpha) # quick recompute (256 int)
     _refresh_current_frame(user_data)
 
 
+def _clim_auto_callback(_sender, app_data, user_data: Visualization):
+    user_data.clim_auto = bool(app_data)
+    enabled = not user_data.clim_auto
+    dpg.configure_item(user_data.clim_min_tag, enabled=enabled)
+    dpg.configure_item(user_data.clim_max_tag, enabled=enabled)
+    _refresh_current_frame(user_data)
+
+def _clim_min_callback(_sender, app_data, user_data: Visualization):
+    user_data.clim_vmin = float(app_data)
+    _refresh_current_frame(user_data)
+
+def _clim_max_callback(_sender, app_data, user_data: Visualization):
+    user_data.clim_vmax = float(app_data)
+    _refresh_current_frame(user_data)
+
+
 # Frame rendering and updating
 # ----------------------------------------------------------------------
 def _render_frame(user_data: Visualization, frame: np.ndarray) -> None:
-    frame_norm = normalize_frame(frame[user_data.viz_quantity_index])
+    field = frame[user_data.viz_quantity_index]
+    if user_data.clim_auto:
+        vmin = float(np.min(field))
+        vmax = float(np.max(field))
+        # Mirror live range into the input fields so the user can see current values
+        # and switch to manual with sensible defaults already filled in
+        user_data._programmatic_slider_update = True
+        dpg.set_value(user_data.clim_min_tag, vmin)
+        dpg.set_value(user_data.clim_max_tag, vmax)
+        user_data._programmatic_slider_update = False
+    else:
+        vmin = user_data.clim_vmin
+        vmax = user_data.clim_vmax
+    frame_norm = normalize_frame(field, vmin, vmax)
+    frame_norm = np.nan_to_num(frame_norm, nan=0.0, posinf=1.0, neginf=0.0)
     # Apply LUT instead of colormap
     indices = (frame_norm * 255).astype(np.uint8)
     if user_data.log_scale:
@@ -368,7 +531,7 @@ def _refresh_current_frame(user_data: Visualization) -> None:
         return
     _render_frame(user_data, user_data._last_frame)
 
-def _update_frame(sender, app_data, user_data: Visualization):
+def _update_frame(_sender, _app_data, user_data: Visualization):
     """
     Frame callback.
     Modes:
@@ -399,15 +562,20 @@ def _update_frame(sender, app_data, user_data: Visualization):
 
     if do_update:
         # Act on the buffer
-        frame = user_data.data.pop_frame() # frame consumed
-        if frame is None:
-            print("[Viz] No more frames to visualise, stopping.")
-            user_data.running = False # I guess? So the GUI is not closed automatically at the end
-            user_data.finished = True
+        item = user_data.data.pop_frame() # frame consumed
+        if item is None:
+            if user_data.data.sim_finished:
+                print("[Viz] No more frames to visualise, stopping.")
+                user_data.running = False
+                user_data.finished = True
+            # else: sim still running but buffer temporarily empty — hold last frame
             return
         else:
+            frame, sim_t = item if isinstance(item, tuple) else (item, None)
             user_data._last_frame = frame # let's cache the frame just in case
             _render_frame(user_data, frame)
+            if sim_t is not None:
+                dpg.set_value(user_data.sim_time_tag, f"t = {sim_t:.4f}")
             user_data.frame_index += 1
 
             t_display = time.perf_counter()
@@ -441,24 +609,27 @@ def _update_frame(sender, app_data, user_data: Visualization):
                     user_data.calib_active_start = None
 
                     # Set normal-mode FPS to measured max
-                    user_data.fps = measured_fps
-                    user_data._frame_period = 1.0 / user_data.fps
-                    user_data._next_due_time = now + user_data._frame_period
-
                     max_slider = max(1, round(measured_fps))
                     print(f"[Viz] Calibration complete: max viz FPS ≈ {max_slider} Hz")
                     user_data.data.max_viz_fps = measured_fps
 
-                    # Resize slider to [1, measured_max], set it to max, and enable it from now on
+                    # Start at user-requested FPS (clamped to measured max)
+                    start_fps = min(float(user_data.args.viz_fps), measured_fps)
+                    user_data.fps = start_fps
+                    user_data._frame_period = 1.0 / user_data.fps
+                    user_data._next_due_time = now + user_data._frame_period
+
+                    # Resize slider to [1, measured_max], set it to start_fps, and enable it from now on
+                    start_slider = max(1, round(start_fps))
                     dpg.configure_item(
                         user_data.slider_tag,
                         min_value=1,
                         max_value=max_slider,
-                        default_value=max_slider,
+                        default_value=start_slider,
                         enabled=True,
                     )
                     user_data._programmatic_slider_update = True
-                    dpg.set_value(user_data.slider_tag, max_slider) # update it (need to set up an "updating" flag first)
+                    dpg.set_value(user_data.slider_tag, start_slider)
                     user_data._programmatic_slider_update = False
 
     # Re-register callback one (or two) dpg frame ahead
