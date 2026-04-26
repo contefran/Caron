@@ -10,17 +10,6 @@ from caron.data import Data
 @njit
 def normalize_frame(frame, vmin, vmax):
     norm = (frame - vmin) / (vmax - vmin + 1e-8)
-    for i in range(norm.shape[0]):
-        for j in range(norm.shape[1]):
-            if norm[i, j] < 0:
-                norm[i, j] = 0.0
-            elif norm[i, j] > 1.0:
-                norm[i, j] = 1.0
-    return norm
-def normalize_frame(frame):
-    frame_min = np.min(frame)
-    frame_max = np.max(frame)
-    norm = (frame - frame_min) / (frame_max - frame_min + 1e-8)
     return np.clip(norm, 0.0, 1.0)
 
 def build_log_map(alpha=50.0):
@@ -46,7 +35,10 @@ class Visualization:
             frames_array = np.load(self.args.sim_file)
             self.no_sim_source_frames = [np.array(frame) for frame in frames_array]
             for frame in frames_array:
-                self.data.push_frame(frame) # fill the buffer with the mock sim. It's a deque
+                self.data.push_frame(frame)
+            if not self.data.quantities:
+                n_ch = int(frames_array.shape[1])
+                self.data.quantities = [f"Channel {i}" for i in range(n_ch)]
 
         # Simulation shape (supports rectangular grids nx != ny)
         self.sim_nx = int(self.args.sim_size)
@@ -66,7 +58,6 @@ class Visualization:
         # Calibration state
         self.calibrated: bool = False # becomes True after calibration
         self.calibrating: bool = False # True while we are in calibration mode
-        self.calib_start_time: float | None = None
         self.calib_active_start: float | None = None  # when the current running segment began
         self.calib_active_time: float = 0.0 # sum of active time during calibration
         self.calib_frame_count: int = 0 # number of frames displayed during calibration
@@ -95,9 +86,9 @@ class Visualization:
         self.current_lut = self.luts[self.current_cmap]
 
         # Quantities
-        self.quantities = self.data.quantities # for instance ['Density', 'Pressure', 'Velocity']
-        self.viz_quantity_index: int = 0 # the index of the quantity to visualize
-        self.viz_quantity: str = self.quantities[self.viz_quantity_index]
+        self.quantities = self.data.quantities
+        self.viz_quantity_index: int = 0
+        self.viz_quantity: str = self.quantities[0] if self.quantities else ""
 
         # Sliders and tags
         self._programmatic_slider_update = False
@@ -122,11 +113,6 @@ class Visualization:
         self.clim_auto_tag = "Caron Clim Auto"
         self.clim_min_tag  = "Caron Clim Min"
         self.clim_max_tag  = "Caron Clim Max"
-
-       # DearPyGui tags
-        #self._font_tag: str = "big_font"
-        self.log_alpha: float = 50.0
-        self.log_map = build_log_map(self.log_alpha)
 
     def _compute_layout_size(self, sim_nx: int, sim_ny: int) -> tuple[int, int, int, int]:
         """
@@ -160,6 +146,9 @@ class Visualization:
 
         if not self.frames:
             raise RuntimeError("[Viz] Visualization initialised with an empty buffer.")
+        if not self.quantities:
+            raise RuntimeError("[Viz] No quantities defined. Simulation must set data.quantities before run().")
+        self.viz_quantity = self.quantities[self.viz_quantity_index]
         if self.args.verbose:
             print(f"[Viz] Loaded a simulation with {len(self.frames)} frames as initial buffering.")
 
@@ -309,12 +298,12 @@ class Visualization:
         )
 
         dpg.setup_dearpygui()
-
-        # Kick off the first update
-        _update_frame(None, None, self)
-
         dpg.show_viewport()
-        dpg.start_dearpygui()
+
+        while dpg.is_dearpygui_running():
+            _update_frame(None, None, self)
+            dpg.render_dearpygui_frame()
+
         dpg.destroy_context()
 
 
@@ -414,16 +403,21 @@ def _restart_callback(_sender, _app_data, user_data: Visualization):
     """Reset visualization and simulation streams to t=0."""
     now = time.perf_counter()
     user_data.running = False
+    user_data.finished = False
     user_data._rate_on_stop(now)
     user_data._reset_rate_measurement(now)
     user_data.frame_index = 0
-    user_data.last_update_time = now
 
     first_frame = None
     if user_data.args.no_sim:
         if user_data.no_sim_source_frames:
             user_data.data.reset_buffer(user_data.no_sim_source_frames)
             first_frame = user_data.no_sim_source_frames[0]
+    elif user_data.args.fake_injection:
+        # mock mode has no initial_prim — just clear the buffer and let the sim refill from frame 0
+        user_data.data.reset_buffer()
+        if user_data.sim is not None:
+            user_data.sim.request_restart()
     else:
         if user_data.sim is not None:
             initial_item = user_data.sim.get_initial_frame_tuple()
@@ -459,19 +453,11 @@ def _colormap_callback(_sender, app_data, user_data: Visualization):
     _refresh_current_frame(user_data)
 
 def _quantity_callback(_sender, app_data, user_data: Visualization):
-    """For XXX app_data is the selected quantity name -- but for the moment it's the index"""
-    user_data.viz_quantity = str(app_data) # e.g. Density
-    user_data.viz_quantity_index = [i for (i,q) in enumerate(user_data.quantities) if q==user_data.viz_quantity][0] # corresponding index
-    _refresh_current_frame(user_data)
-
-def _log_checkbox_callback(_sender, app_data, user_data: Visualization):
-    "Log button"
-def _quantity_callback(sender, app_data, user_data: Visualization):
     user_data.viz_quantity = str(app_data)
     user_data.viz_quantity_index = user_data.quantities.index(app_data)
     _refresh_current_frame(user_data)
 
-def _log_checkbox_callback(sender, app_data, user_data: Visualization):
+def _log_checkbox_callback(_sender, app_data, user_data: Visualization):
     user_data.log_scale = bool(app_data)
     dpg.configure_item(user_data.log_strength_tag, enabled=bool(app_data))
     _refresh_current_frame(user_data)
@@ -491,10 +477,14 @@ def _clim_auto_callback(_sender, app_data, user_data: Visualization):
     _refresh_current_frame(user_data)
 
 def _clim_min_callback(_sender, app_data, user_data: Visualization):
+    if user_data.clim_auto:
+        return
     user_data.clim_vmin = float(app_data)
     _refresh_current_frame(user_data)
 
 def _clim_max_callback(_sender, app_data, user_data: Visualization):
+    if user_data.clim_auto:
+        return
     user_data.clim_vmax = float(app_data)
     _refresh_current_frame(user_data)
 
@@ -569,7 +559,6 @@ def _update_frame(_sender, _app_data, user_data: Visualization):
                 user_data.running = False
                 user_data.finished = True
             # else: sim still running but buffer temporarily empty — hold last frame
-            return
         else:
             frame, sim_t = item if isinstance(item, tuple) else (item, None)
             user_data._last_frame = frame # let's cache the frame just in case
@@ -632,7 +621,3 @@ def _update_frame(_sender, _app_data, user_data: Visualization):
                     dpg.set_value(user_data.slider_tag, start_slider)
                     user_data._programmatic_slider_update = False
 
-    # Re-register callback one (or two) dpg frame ahead
-    with dpg.mutex():
-        target_frame = dpg.get_frame_count() + 1 # +2 halves the viz_fps
-        dpg.set_frame_callback(target_frame, _update_frame, user_data=user_data)

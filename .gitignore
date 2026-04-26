@@ -5,3 +5,5 @@ mock_sim.npy
 caron/frames/*
 caron/__pycache__/*
 CLAUDE.md
+code_review.md
+
