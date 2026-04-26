@@ -1,17 +1,13 @@
 """Simulation class producing data for the visualization."""
 
 # imports
-from matplotlib.pylab import gamma
 from caron.data import Data
 import numpy as np
 import time
-from collections import deque
 import threading
-from typing import Any
 import jax.numpy as jnp
 from caron.physics import primitive_to_conserved, conserved_to_primitive
 from caron.solver import advance_step, solve_euler_2d
-from jax import jit
 
 
 class Simulation:
@@ -23,12 +19,6 @@ class Simulation:
         self.args = args
         self.data = data
         self.sim_size: int = self.args.sim_size
-
-        # Rolling window for FPS measurement
-        self.timestamps = deque()
-        self.window_s = 2.0  # seconds
-        self.lock = threading.Lock()
-        self.cond = threading.Condition()
 
         self._rate_lock = threading.Lock()
         self._rate_active_start: float | None = (
@@ -81,11 +71,7 @@ class Simulation:
         self.coords = (x, y)
         self.prim = jnp.concatenate([rho[None, ...], vel, prs[None, ...]], axis=0)
         self.data.coords = self.coords
-<<<<<<< simulation
-=======
-        #
 
->>>>>>> main
 
     @property
     def dx(self):
@@ -120,11 +106,7 @@ class Simulation:
         self.prim = conserved_to_primitive(self.cons, self.gamma)
 
     def run_no_viz(self) -> None:
-<<<<<<< simulation
         self.data.push_frame(self.prim[0])  # Push initial density frame to data buffer
-=======
-        self.data.push_frame(self.prim)  # Push initial quantity frame to data buffer        
->>>>>>> main
         self.cons = primitive_to_conserved(self.prim, self.gamma)
         self.cons = solve_euler_2d(
             U0=self.cons,
@@ -136,10 +118,7 @@ class Simulation:
             dt=self.dt,
         )
         self.prim = conserved_to_primitive(self.cons, self.gamma)
-<<<<<<< simulation
         # raise NotImplementedError("[Sim] Simulation.run is not implemented yet.")
-=======
->>>>>>> main
 
     def run_mock(self) -> None:
         """Feed frames into the buffer at a fixed rate (sim_fps), and eventually get paused/unpaused."""
@@ -147,28 +126,19 @@ class Simulation:
         self.sim_file = self.args.sim_file
         sim = np.load(self.sim_file)
         self.sim_size: int = sim.shape[2]
-<<<<<<< simulation
-        print(
-            f"[Sim] Loaded mock simulation from {self.sim_file} with {sim.shape[0]} frames of linear size {sim.shape[2]}."
-        )
-        print(
-            f"[Sim] Simulation initialized in fake_injection mode. Injecting the buffer at {self.sim_fps} FPS."
-        )
-=======
 
         # set spatial coordinates
         self.xmin: float = 0.0
         self.xmax: float = 1.0
         self.ymin: float = 0.0
         self.ymax: float = 1.0
-        x = jnp.linspace(self.xmin, self.xmax, num=self.args.sim_size)
-        y = jnp.linspace(self.ymin, self.ymax, num=self.args.sim_size)
+        x = jnp.linspace(self.xmin, self.xmax, num=self.sim_size)
+        y = jnp.linspace(self.ymin, self.ymax, num=self.sim_size)
         self.coords = (x, y) # spatial coordinates
         self.data.coords = self.coords # push to data
 
         print(f"[Sim] Loaded mock simulation from {self.sim_file} with {sim.shape[0]} frames of linear size {sim.shape[2]}.")
         print(f"[Sim] Simulation initialized in fake_injection mode. Injecting the buffer at {self.sim_fps} FPS.")
->>>>>>> main
 
         dt = 1.0 / self.sim_fps  # seconds per frame of the mock simulation injection
         t_next = time.perf_counter() + dt  # time of the next frame to push (cumulative)
@@ -288,16 +258,10 @@ class Simulation:
     # Internal functions to handle pauses
     # ------------------------------------------------------------------
     def _is_sim_paused(self) -> bool:
-        try:
-            return bool(self.data.is_sim_paused())
-        except Exception:
-            return bool(getattr(self.data, "sim_paused", False))
+        return self.data.is_sim_paused()
 
     def _get_sim_cmd_version(self) -> int:
-        try:
-            return int(self.data.get_sim_cmd_version())
-        except Exception:
-            return int(getattr(self.data, "sim_cmd_version", 0))
+        return self.data.get_sim_cmd_version()
 
     def _sync_sim_command_from_data(self, now: float) -> None:
         """If Data issued a new sim command (pause/unpause), reset avg-fps window."""

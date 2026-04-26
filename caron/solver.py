@@ -1,10 +1,8 @@
 import jax.numpy as jnp
-from jax import jit, lax
+from jax import jit
 from physics import rusanov_flux, conserved_to_primitive
 import matplotlib.pyplot as plt
 import numpy as np
-from time import time
-
 
 def solve_euler_2d(U0,t_end,dx,dy,gamma,coords,dt):
     """

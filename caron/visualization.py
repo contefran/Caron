@@ -12,33 +12,17 @@ def normalize_frame(frame):
     frame_min = np.min(frame)
     frame_max = np.max(frame)
     norm = (frame - frame_min) / (frame_max - frame_min + 1e-8)
-    for i in range(norm.shape[0]):
-        for j in range(norm.shape[1]):
-            if norm[i, j] < 0:
-                norm[i, j] = 0.0
-            elif norm[i, j] > 1.0:
-                norm[i, j] = 1.0
-    return norm
+    return np.clip(norm, 0.0, 1.0)
 
-@njit
-def build_log_map(alpha = 50.0): # alpha is the compression strenght. The larger the value, the higher the log compression
-    """ maps linear [0..255] -> log-compressed [0..255] """
+def build_log_map(alpha=50.0):
+    """Maps linear [0..255] -> log-compressed [0..255]."""
     x = np.linspace(0.0, 1.0, 256)
     y = np.log1p(alpha * x) / np.log1p(alpha)
     return (y * 255.0).astype(np.uint8)
 
 
 class Visualization:
-    """
-    Consume frames from a Data buffer and display them with DearPyGui.
-    Phase 1:
-      *[V] We assume that the simulation has already filled the buffer.
-      *[V] We simply pop frames from Data at a rate set by 'fps'.
-    Phase 2:
-      * We feed the buffer with the mock simulation, but at a certain rate
-    Phase 3:
-      * We feed the buffer with a real-time simulation.
-    """
+    """Consume frames from a Data buffer and display them with DearPyGui."""
 
 
     # Initialization
@@ -63,11 +47,9 @@ class Visualization:
         self.fps = float(self.data.max_viz_fps)
         self.max_viz_fps: float = self.fps  # after calibration will be changed to the actual max FPS
         self._frame_period = 1.0 / self.fps
-        self._next_due_time = time.perf_counter()  # better clock for intervals
-        self._last_frame: np.ndarray | None = None # here we cache the last frame, in case we want to modify it while pausing (e.g. log scale)
+        self._next_due_time = time.perf_counter()
+        self._last_frame: np.ndarray | None = None
 
-        # For debugging prints only (actual time between updates)
-        self.last_update_time: float = self._next_due_time
         self.frame_index: int = 0
 
         # Calibration state
@@ -107,18 +89,15 @@ class Visualization:
         self.viz_quantity: str = self.quantities[self.viz_quantity_index]
 
         # Sliders and tags
-        self._programmatic_slider_update = False # to update the slider when the fps is forced down by the buffer
+        self._programmatic_slider_update = False
         self.slider_tag = "Caron FPS Slider"
         self.cmap_list_tag = "Caron Colormaps List"
         self.quantity_tag = "Caron Quantities List"
         self.log_strength_tag = "Caron Log Strength Slider"
         self.texture_tag = "frame_tag"
         self.log_scale: bool = False
-        self.log_alpha: float = 50.0 # compression log strength
-        self.log_map = build_log_map(self.log_alpha) # basically mapping the log scale once on a 1D array
-       
-       # DearPyGui tags
-        #self._font_tag: str = "big_font"
+        self.log_alpha: float = 50.0
+        self.log_map = build_log_map(self.log_alpha)
 
 
     # Run
@@ -126,9 +105,7 @@ class Visualization:
     def run(self) -> None:
         """Check the buffer, set up DearPyGui and start the visualisation."""
 
-        # Call the buffer
-        self.frames = self.data.buffer  # already a deque, as set in Data. Here it should be already populated by the full sim (no_sim) or by the injection (fake or not)
-        if not self.frames: # and it would be very weird
+        if not self.frames:
             raise RuntimeError("[Viz] Visualization initialised with an empty buffer.")
         if self.args.verbose:
             print(f"[Viz] Loaded a simulation of size {self.sim_size}x{self.sim_size} with {len(self.frames)} frames as initial buffering.")
@@ -138,18 +115,13 @@ class Visualization:
         frame_min = np.min(frame)
         frame_max = np.max(frame)
         frame_norm = (frame - frame_min) / (frame_max - frame_min)
-        frame_rgb = np.stack((frame_norm,) * 3, axis=-1)
-        frame_rgb = frame_rgb.astype(np.float32) / np.max(frame_rgb)
+        frame_rgb = np.stack((frame_norm,) * 3, axis=-1).astype(np.float32)
         self.frame_flattened: np.ndarray = frame_rgb.flatten()
 
         # DearPyGui setup
         dpg.create_context()
 
-        # To get the font back, uncomment the registry and bind_font below
-        # with dpg.font_registry():
-        #     dpg.add_font("C:/Windows/Fonts/BKANT.TTF", 20, tag=self._font_tag)
-
-        with dpg.texture_registry(show=True):
+        with dpg.texture_registry():
             dpg.add_raw_texture(
                 int(self.sim_size),
                 int(self.sim_size),
@@ -167,9 +139,6 @@ class Visualization:
             no_move=True,
             no_resize=False,
         ):
-            # If using the font:
-            # dpg.bind_font(self._font_tag)
-
             with dpg.group(label="Visualizator"): # the big visualization window
                 with dpg.group(label="Slider"): # above there is the slider
                     dpg.add_slider_int(
@@ -300,14 +269,11 @@ class Visualization:
     # ------------------------------------------------------------------
     def _sync_viz_command_from_data(self, now: float) -> None:
         """If Data issued a new viz command, apply it and reset the avg_fps calculation window."""
-        try: # Just in case data wants to change something during the iteration
-            ver = self.data.get_viz_cmd_version()
-        except Exception:
-            ver = getattr(self.data, "viz_cmd_version", 0)
-        if ver == self._seen_viz_cmd_version: # no change happened
+        ver = self.data.get_viz_cmd_version()
+        if ver == self._seen_viz_cmd_version:
             return
-        self._seen_viz_cmd_version = ver # change obviously happened
-        target = self.data.get_viz_target_fps() # get the needed fps as calculated by Data
+        self._seen_viz_cmd_version = ver
+        target = self.data.get_viz_target_fps()
         self._apply_new_fps(target, now, update_slider=True, reset_measurement=True)
 
     def _apply_new_fps(self, new_fps: float, now: float, *, update_slider: bool, reset_measurement: bool) -> None:
@@ -368,24 +334,13 @@ def _colormap_callback(sender, app_data, user_data: Visualization):
     _refresh_current_frame(user_data)
 
 def _quantity_callback(sender, app_data, user_data: Visualization):
-    """For XXX app_data is the selected quantity name -- but for the moment it's the index"""
-    user_data.viz_quantity = str(app_data) # e.g. Density
-    user_data.viz_quantity_index = [i for (i,q) in enumerate(user_data.quantities) if q==user_data.viz_quantity][0] # corresponding index
+    user_data.viz_quantity = str(app_data)
+    user_data.viz_quantity_index = user_data.quantities.index(app_data)
     _refresh_current_frame(user_data)
 
 def _log_checkbox_callback(sender, app_data, user_data: Visualization):
-    "Log button"
     user_data.log_scale = bool(app_data)
-    if bool(app_data):
-        dpg.configure_item(
-            user_data.log_strength_tag,
-            enabled=True,
-                        )
-    else:
-        dpg.configure_item(
-            user_data.log_strength_tag,
-            enabled=False,
-                        )
+    dpg.configure_item(user_data.log_strength_tag, enabled=bool(app_data))
     _refresh_current_frame(user_data)
 
 def _log_strength_callback(sender, app_data, user_data: Visualization):
@@ -443,10 +398,6 @@ def _update_frame(sender, app_data, user_data: Visualization):
                 user_data._next_due_time = now + user_data._frame_period
 
     if do_update:
-        # Debug: time between displayed frames
-        #print(f"[Viz] time since last update: {now - user_data.last_update_time:.3f}s") # the real time between updates
-        user_data.last_update_time = now
-
         # Act on the buffer
         frame = user_data.data.pop_frame() # frame consumed
         if frame is None:
