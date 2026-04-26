@@ -298,12 +298,12 @@ class Visualization:
         )
 
         dpg.setup_dearpygui()
-
-        # Kick off the first update
-        _update_frame(None, None, self)
-
         dpg.show_viewport()
-        dpg.start_dearpygui()
+
+        while dpg.is_dearpygui_running():
+            _update_frame(None, None, self)
+            dpg.render_dearpygui_frame()
+
         dpg.destroy_context()
 
 
@@ -403,6 +403,7 @@ def _restart_callback(_sender, _app_data, user_data: Visualization):
     """Reset visualization and simulation streams to t=0."""
     now = time.perf_counter()
     user_data.running = False
+    user_data.finished = False
     user_data._rate_on_stop(now)
     user_data._reset_rate_measurement(now)
     user_data.frame_index = 0
@@ -412,6 +413,11 @@ def _restart_callback(_sender, _app_data, user_data: Visualization):
         if user_data.no_sim_source_frames:
             user_data.data.reset_buffer(user_data.no_sim_source_frames)
             first_frame = user_data.no_sim_source_frames[0]
+    elif user_data.args.fake_injection:
+        # mock mode has no initial_prim — just clear the buffer and let the sim refill from frame 0
+        user_data.data.reset_buffer()
+        if user_data.sim is not None:
+            user_data.sim.request_restart()
     else:
         if user_data.sim is not None:
             initial_item = user_data.sim.get_initial_frame_tuple()
@@ -553,7 +559,6 @@ def _update_frame(_sender, _app_data, user_data: Visualization):
                 user_data.running = False
                 user_data.finished = True
             # else: sim still running but buffer temporarily empty — hold last frame
-            return
         else:
             frame, sim_t = item if isinstance(item, tuple) else (item, None)
             user_data._last_frame = frame # let's cache the frame just in case
@@ -616,7 +621,3 @@ def _update_frame(_sender, _app_data, user_data: Visualization):
                     dpg.set_value(user_data.slider_tag, start_slider)
                     user_data._programmatic_slider_update = False
 
-    # Re-register callback one (or two) dpg frame ahead
-    with dpg.mutex():
-        target_frame = dpg.get_frame_count() + 1 # +2 halves the viz_fps
-        dpg.set_frame_callback(target_frame, _update_frame, user_data=user_data)

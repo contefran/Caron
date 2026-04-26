@@ -104,9 +104,9 @@ class Main:
         """Periodically read measured SR/VR and ask Data to adjust commands."""
         if self.args.verbose:
             print("[Main] Control loop started")
-        while not self.viz.finished:
-            time.sleep(dt) # What's a good monitoring rate?
-            if self.viz.calibrated: # start monitoring only after calibration
+        while True:
+            time.sleep(dt)
+            if self.viz.calibrated and not self.viz.finished:
                 sim_rate = float(self.sim.get_measured_fps())
                 viz_rate = float(self.viz.get_measured_fps())
                 self.data.balance_rates(sim_rate, viz_rate)
