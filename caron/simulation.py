@@ -4,7 +4,6 @@
 from caron.data import Data
 import numpy as np
 import time
-from collections import deque
 import threading
 import jax.numpy as jnp
 from caron.physics import primitive_to_conserved, conserved_to_primitive
@@ -25,12 +24,6 @@ class Simulation:
             init if init is not None else getattr(self.args, "init", "riemann_2d")
         )
         self._restart_event = threading.Event()
-
-        # Rolling window for FPS measurement
-        self.timestamps = deque()
-        self.window_s = 2.0  # seconds
-        self.lock = threading.Lock()
-        self.cond = threading.Condition()
 
         self._rate_lock = threading.Lock()
         self._rate_active_start: float | None = (
@@ -101,6 +94,10 @@ class Simulation:
             self._restart_event.clear()
             return True
         return False
+        self.coords = (x, y)
+        self.prim = jnp.concatenate([rho[None, ...], vel, prs[None, ...]], axis=0)
+        self.data.coords = self.coords
+
 
     @property
     def dx(self):
@@ -196,6 +193,28 @@ class Simulation:
         print(
             f"[Sim] Simulation initialized in fake_injection mode. Injecting the buffer at {self.sim_fps} FPS."
         )
+
+        # set spatial coordinates
+        self.xmin: float = 0.0
+        self.xmax: float = 1.0
+        self.ymin: float = 0.0
+        self.ymax: float = 1.0
+        x = jnp.linspace(self.xmin, self.xmax, num=self.sim_size)
+        y = jnp.linspace(self.ymin, self.ymax, num=self.sim_size)
+        self.coords = (x, y) # spatial coordinates
+        self.data.coords = self.coords # push to data
+
+        print(f"[Sim] Loaded mock simulation from {self.sim_file} with {sim.shape[0]} frames of linear size {sim.shape[2]}.")
+        print(f"[Sim] Simulation initialized in fake_injection mode. Injecting the buffer at {self.sim_fps} FPS.")
+
+        dt = 1.0 / self.sim_fps  # seconds per frame of the mock simulation injection
+        t_next = time.perf_counter() + dt  # time of the next frame to push (cumulative)
+
+        now0 = time.perf_counter()  # starting time t0
+        self._seen_sim_cmd_version = (
+            self._get_sim_cmd_version()
+        )  # same command state at start
+        self._reset_rate_measurement(now0)
 
         while True:
             self.data.reset_buffer()
@@ -314,16 +333,10 @@ class Simulation:
     # Internal functions to handle pauses
     # ------------------------------------------------------------------
     def _is_sim_paused(self) -> bool:
-        try:
-            return bool(self.data.is_sim_paused())
-        except Exception:
-            return bool(getattr(self.data, "sim_paused", False))
+        return self.data.is_sim_paused()
 
     def _get_sim_cmd_version(self) -> int:
-        try:
-            return int(self.data.get_sim_cmd_version())
-        except Exception:
-            return int(getattr(self.data, "sim_cmd_version", 0))
+        return self.data.get_sim_cmd_version()
 
     def _sync_sim_command_from_data(self, now: float) -> None:
         """If Data issued a new sim command (pause/unpause), reset avg-fps window."""

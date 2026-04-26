@@ -57,16 +57,9 @@ class Main:
             return
 
         if self.args.no_viz:
-            self.sim.run_no_viz() # just for debugging the simulation
+            self.sim.run_no_viz()
             return
-        
-        # Phase 1: easy easy, just run one after the other
-        #if not self.args.no_viz:
-        #    self.viz.run() # visualises self.data frames
-        #if not self.args.no_sim:
-        #    self.sim.run() # fills self.data with simulation frames
 
-        # Phase 2: replace with self.data class buffering
         if self.args.no_sim:
             self.viz.run() # visualises self.data frames
         else:
@@ -81,6 +74,7 @@ class Main:
 
                 # Wait until buffer reaches safe_min before starting viz
                 while len(self.data.buffer) < self.data.buffer_safe_min and not self.data.sim_finished:
+                while len(self.data) < self.data.buffer_safe_min:
                     time.sleep(0.01)
                 if len(self.data.buffer) == 0:
                     print("[Main] Simulation ended before producing frames. GUI not started.")
@@ -112,8 +106,8 @@ class Main:
     def _control_loop(self, dt) -> None:
         """Periodically read measured SR/VR and ask Data to adjust commands."""
         if self.args.verbose:
-            print(f"[Main] Control loop started")
-        while True and not self.viz.finished:
+            print("[Main] Control loop started")
+        while not self.viz.finished:
             time.sleep(dt) # What's a good monitoring rate?
             if self.viz.calibrated: # start monitoring only after calibration
                 sim_rate = float(self.sim.get_measured_fps())
@@ -125,11 +119,3 @@ class Main:
 
 if __name__ == "__main__":
     Main().run()
-
-
-
-
-"""Todo:
-- Colormaps? Can they be defined also for log scale?
-  Do not let anyone change the slider during calibration.
-"""
