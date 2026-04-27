@@ -30,17 +30,16 @@ Editable install (core dependencies only):
 python -m pip install -e .
 ```
 
-For the physics solver (JAX), pick the extra that matches your hardware:
+JAX (CPU) is included in the base install. For GPU acceleration, install the matching extra on top:
 
 ```bash
-pip install -e ".[jax-cpu]"   # CPU — Intel, AMD CPU, no GPU
 pip install -e ".[jax-cuda]"  # NVIDIA GPU (CUDA 12)
 pip install -e ".[jax-rocm]"  # AMD GPU (ROCm)
 ```
 
 At startup the active JAX backend is printed to the console so you can confirm which device is in use.
 
-Core dependencies (declared in `pyproject.toml`): NumPy, Matplotlib, DearPyGui, Numba.
+Core dependencies (declared in `pyproject.toml`): NumPy, Matplotlib, DearPyGui, Numba, JAX.
 
 ---
 

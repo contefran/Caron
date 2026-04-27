@@ -18,11 +18,11 @@ dependencies = [
     "argparse",
     "matplotlib",
     "dearpygui",
-    "numba"
+    "numba",
+    "jax"
 ]
 
 [project.optional-dependencies]
-jax-cpu  = ["jax"]
 jax-cuda = ["jax[cuda12]"]
 jax-rocm = ["jax[rocm]"]
 
