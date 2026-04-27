@@ -105,6 +105,7 @@ class Visualization:
 
         # Simulation time display
         self.sim_time_tag = "Caron Sim Time"
+        self.exit_modal_tag = "Caron Exit Modal"
 
         # Colorscale limits
         self.clim_auto: bool = True
@@ -291,6 +292,37 @@ class Visualization:
                         )
                         dpg.add_text("t = -.----", tag=self.sim_time_tag)
 
+            _btn_w, _btn_h = 55, 20
+            dpg.add_button(
+                label="Quit",
+                callback=_exit_callback,
+                width=_btn_w,
+                height=_btn_h,
+                pos=[window_width - _btn_w - 8, window_height - _btn_h - 8],
+            )
+
+        _modal_w, _modal_h = 280, 100
+        with dpg.window(
+            label="Confirm Close",
+            modal=True,
+            no_close=True,
+            show=False,
+            tag=self.exit_modal_tag,
+            width=_modal_w,
+            height=_modal_h,
+            no_resize=True,
+        ):
+            dpg.add_text("Close the visualizer?")
+            dpg.add_spacer(height=6)
+            with dpg.group(horizontal=True):
+                dpg.add_button(label="Yes, close", callback=lambda: dpg.stop_dearpygui(), width=120)
+                dpg.add_spacer(width=6)
+                dpg.add_button(
+                    label="Cancel",
+                    callback=lambda: dpg.configure_item(self.exit_modal_tag, show=False),
+                    width=120,
+                )
+
         dpg.create_viewport(
             title="Our lovely Caron",
             width=window_width,
@@ -298,6 +330,10 @@ class Visualization:
         )
 
         dpg.setup_dearpygui()
+        if hasattr(dpg, 'set_exit_callback'):
+            dpg.set_exit_callback(_exit_callback)
+        else:
+            print("[Viz] DPG version does not support set_exit_callback; use the Quit button to exit safely.")
         dpg.show_viewport()
 
         while dpg.is_dearpygui_running():
@@ -377,6 +413,13 @@ class Visualization:
 
 # Callbacks (operate via user_data)
 # ----------------------------------------------------------------------
+def _exit_callback(_sender=None, _app_data=None, _user_data=None):
+    """Show the close-confirmation modal (used by both X button and Quit button)."""
+    try:
+        dpg.configure_item("Caron Exit Modal", show=True)
+    except Exception as e:
+        print(f"[Viz] Exit callback error: {e}")
+
 def _start_callback(_sender, _app_data, user_data: Visualization):
     "Start button"
     user_data.running = True
