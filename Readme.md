@@ -24,18 +24,22 @@ For debugging purposes, Caron can run with a **mock simulation** stored in a Num
 
 ## Installation
 
-Editable install:
+Editable install (core dependencies only):
 
 ```bash
 python -m pip install -e .
 ```
 
-Dependencies (also declared in `pyproject.toml`):
-- NumPy
-- Matplotlib
-- DearPyGui
-- Numba
-- Jax
+JAX (CPU) is included in the base install. For GPU acceleration, install the matching extra on top:
+
+```bash
+pip install -e ".[jax-cuda]"  # NVIDIA GPU (CUDA 12)
+pip install -e ".[jax-rocm]"  # AMD GPU (ROCm)
+```
+
+At startup the active JAX backend is printed to the console so you can confirm which device is in use.
+
+Core dependencies (declared in `pyproject.toml`): NumPy, Matplotlib, DearPyGui, Numba, JAX.
 
 ---
 
@@ -85,20 +89,17 @@ All options can be seen by typing `Caron.py -h`.
 
 | Flag | Type | Default | Meaning |
 |---|---:|---:|---|
-| `--sim_size` | int | 512 | Linear grid size (used mainly for initial UI sizing) |
-| `--n_frames` | int | 200 | Placeholder (real simulation not wired yet) |
-| `--viz_fps` | float | 100 | Initial visualisation FPS target |
+| `--sim_size` | int | 512 | Linear grid size of the simulation grid |
+| `--viz_fps` | float | 60 | Initial visualisation FPS target |
 | `--calib_time` | float | 3 | Calibration duration (seconds of active “running” time) |
 | `--calib_frames` | int | 50 | Minimum frames required during calibration |
 | `--buffer_safe_max` | int | 300 | Buffer size above which simulation is paused (overflow) |
 | `--sim_file` | str | `../mock_sim.npy` | Path to the mock `.npy` file |
 | `--no_sim` | flag | off | Disable simulation thread; visualise `.npy` only |
-| `--no_viz` | flag | off | **Currently a placeholder (not wired)** |
+| `--no_viz` | flag | off | Disable visualisation (run simulation only) |
 | `--fake_injection` | flag | off | Inject `.npy` frames at fixed FPS in a sim thread |
 | `--fake_sim_fps` | int | 60 | Injection FPS for `--fake_injection` |
 | `--ctrl_dt` | float | 0.2 | Control-loop tick interval (seconds) |
-
-**Important note on `--no_viz`:** the argument exists, but the current `Main.run()` logic does not actually route into a “simulation-only” code path (the old `run_sim_only()` is commented out). Integrating the real simulation into the pipeline is coming up in the next few days.
 
 ---
 
@@ -133,8 +134,4 @@ Before normal operation, in the first `calib_time` seconds of active visualizati
 
 ---
 
-## Current limitations / known gaps
-
-- The real simulation (`Simulation.run`) is not implemented yet (it is ready, but needs to be wired in).
-- “Simulation-only” mode (`--no_viz`) is not wired in `Main.run()` and it will probably be removed. The simulation has been tested elsewhere.
 
