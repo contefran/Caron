@@ -41,6 +41,10 @@ class Simulation:
             self.quantities = [f"Channel {i}" for i in range(n_ch)]
             self.data.quantities = self.quantities
         elif not args.no_sim:
+            import jax
+            backend = jax.default_backend()
+            devices = jax.devices()
+            print(f"[Sim] JAX backend: {backend} | devices: {devices}")
             self.import_init(self.init_name)
 
     def import_init(self, init_name: str | None = None) -> None:

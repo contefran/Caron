@@ -22,7 +22,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-jax = ["jax"]
+jax-cpu  = ["jax"]
+jax-cuda = ["jax[cuda12]"]
+jax-rocm = ["jax[rocm]"]
 
 [tool.setuptools.packages.find]
 include = ["caron*"]

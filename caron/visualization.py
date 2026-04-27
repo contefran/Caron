@@ -430,6 +430,7 @@ def _restart_callback(_sender, _app_data, user_data: Visualization):
         _render_frame(user_data, first_frame)
     dpg.set_value(user_data.sim_time_tag, "t = 0.0000")
 
+    user_data.data.reset_viz_target_fps()
     user_data.running = True
     user_data._rate_on_start(time.perf_counter())
     user_data._next_due_time = time.perf_counter()
@@ -439,10 +440,12 @@ def _fps_callback(_sender, app_data, user_data: Visualization):
     if user_data._programmatic_slider_update:
         return
     now = time.perf_counter()
-    user_data.fps = float(max(1, int(app_data))) # avoid negatives
-    user_data._frame_period = 1.0 / user_data.fps # new frame visualization period
-    user_data._next_due_time = now + user_data._frame_period  # re-align schedule
+    new_fps = float(max(1, int(app_data)))
+    user_data.fps = new_fps
+    user_data._frame_period = 1.0 / user_data.fps
+    user_data._next_due_time = now + user_data._frame_period
     user_data._reset_rate_measurement(now)
+    user_data.data.update_viz_target_fps_from_user(new_fps)  # keep Data in sync so underflow can re-cap if needed
 
 def _colormap_callback(_sender, app_data, user_data: Visualization):
     """For add_combo, app_data is the selected string"""

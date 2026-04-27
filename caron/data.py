@@ -100,7 +100,7 @@ class Data:
           sim_rate: measured simulation push rate (Hz)
           viz_rate: measured visualization pop/render rate (Hz)
         Outputs (commands):
-          - adjusts visualization target fps
+          - adjusts visualization target fps (only downward; never auto-increases)
         """
         sim_rate = float(sim_rate)
         viz_rate = float(viz_rate)
@@ -108,17 +108,20 @@ class Data:
         with self.cond:
             n = len(self.buffer)
             if n < self.buffer_safe_min and not self.sim_finished:
-                new_viz = max(self.min_viz_fps, sim_rate - self.viz_margin_fps)
-                if abs(new_viz - self.viz_target_fps) > 1e-12:
-                    print(f"[Data] Buffer underflow detected: Visualization FPS reduced to {new_viz} Hz")
+                if sim_rate <= self.viz_margin_fps:
+                    # sim hasn't ramped up yet or is stalled — don't apply cap
                     if sim_rate == 0.0:
                         print("[Data] Warning: simulation was found stopped during underflow.")
                         self._set_sim_paused_locked(False)
-                    self._set_viz_target_fps_locked(new_viz)
-                    self.cond.notify_all()
-            elif n >= self.buffer_safe_min and self.viz_target_fps < self.max_viz_fps:
-                new_viz = min(self.max_viz_fps, self.viz_target_fps + self.viz_margin_fps)
-                if new_viz - self.viz_target_fps > 1e-12:
+                    return
+                balance = max(self.min_viz_fps, sim_rate - self.viz_margin_fps)
+                # Snap down to the nearest 5 Hz floor; if within 1 Hz of it, go one step lower
+                snapped = int(balance // 5) * 5
+                if balance - snapped < 1.0:
+                    snapped -= 5
+                new_viz = max(self.min_viz_fps, float(snapped))
+                if new_viz < self.viz_target_fps:
+                    print(f"[Data] Buffer underflow: balance point {balance:.1f} Hz → capping viz at {new_viz:.0f} Hz")
                     self._set_viz_target_fps_locked(new_viz)
                     self.cond.notify_all()
 
@@ -153,6 +156,18 @@ class Data:
         with self.lock:
             return len(self.buffer)
 
+
+    def update_viz_target_fps_from_user(self, fps: float) -> None:
+        """Called when the user manually sets FPS via the slider (no version bump)."""
+        with self.lock:
+            fps = max(self.min_viz_fps, min(float(fps), self.max_viz_fps))
+            self.viz_target_fps = fps
+
+    def reset_viz_target_fps(self) -> None:
+        """Reset viz FPS to calibrated max on restart (bumps version so slider updates)."""
+        with self.cond:
+            self._set_viz_target_fps_locked(self.max_viz_fps)
+            self.cond.notify_all()
 
     # Command setters (data use only)
     # ------------------------------------------------------------------
