@@ -5,11 +5,6 @@ from caron.physics import hllc_flux, conserved_to_primitive
 import matplotlib.pyplot as plt
 import numpy as np
 
-from jax import jit
-from physics import rusanov_flux, conserved_to_primitive
-import matplotlib.pyplot as plt
-import numpy as np
-
 # PLM reconstruction helpers
 # ----------------------------------------------------------------------
 def _minmod(a, b):

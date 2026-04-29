@@ -77,18 +77,11 @@ class Simulation:
 
     def _stable_dt(self) -> float:
         """Compute a CFL-safe time step and cap it by the configured dt."""
-        prim = np.array(self.prim)
-        rho = prim[0]
-        vx = prim[1]
-        vy = prim[2]
-        prs = prim[4]
-
-        rho_safe = np.maximum(rho, 1e-12)
-        prs_safe = np.maximum(prs, 1e-12)
-        cs = np.sqrt(self.gamma * prs_safe / rho_safe)
-
-        smax_x = float(np.max(np.abs(vx) + cs))
-        smax_y = float(np.max(np.abs(vy) + cs))
+        rho = jnp.maximum(self.prim[0], 1e-12)
+        prs = jnp.maximum(self.prim[4], 1e-12)
+        cs = jnp.sqrt(self.gamma * prs / rho)
+        smax_x = float(jnp.max(jnp.abs(self.prim[1]) + cs))
+        smax_y = float(jnp.max(jnp.abs(self.prim[2]) + cs))
 
         inv_dt = (smax_x / max(self.dx, 1e-12)) + (smax_y / max(self.dy, 1e-12))
         if inv_dt <= 1e-12:
