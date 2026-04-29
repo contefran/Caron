@@ -1,3 +1,4 @@
+import math
 import time
 import numpy as np
 from numba import njit
@@ -7,16 +8,36 @@ import dearpygui.dearpygui as dpg
 from caron.data import Data
 
 
-@njit
-def normalize_frame(frame, vmin, vmax):
-    norm = (frame - vmin) / (vmax - vmin + 1e-8)
-    return np.clip(norm, 0.0, 1.0)
-
 def build_log_map(alpha=50.0):
     """Maps linear [0..255] -> log-compressed [0..255]."""
     x = np.linspace(0.0, 1.0, 256)
     y = np.log1p(alpha * x) / np.log1p(alpha)
     return (y * 255.0).astype(np.uint8)
+
+@njit(cache=True)
+def apply_colormap_to_buffer(field, vmin, vmax, lut, log_map, use_log, out):
+    """Normalize field, apply LUT, write float32 RGB into pre-allocated out (flat nx*ny*3)."""
+    nx, ny = field.shape
+    scale = 1.0 / (vmax - vmin + 1e-8)
+    k = 0
+    for i in range(nx):
+        for j in range(ny):
+            v = (field[i, j] - vmin) * scale
+            if v != v:   # NaN → clamp to 0
+                v = 0.0
+            elif v < 0.0:
+                v = 0.0
+            elif v > 1.0:
+                v = 1.0
+            idx = int(v * 255.0)
+            if idx > 255:
+                idx = 255
+            if use_log:
+                idx = int(log_map[idx])
+            out[k]     = lut[idx, 0] / 255.0
+            out[k + 1] = lut[idx, 1] / 255.0
+            out[k + 2] = lut[idx, 2] / 255.0
+            k += 3
 
 
 class Visualization:
@@ -107,6 +128,21 @@ class Visualization:
         self.sim_time_tag = "Caron Sim Time"
         self.exit_modal_tag = "Caron Exit Modal"
 
+        # Pre-allocated render buffers, one per quantity (set in run() once resolution is known)
+        self._render_bufs: list[np.ndarray] = []
+
+        # All-quantities view
+        self.show_all: bool = False
+        self._all_mode_initialized: bool = False  # textures+widgets created on first toggle
+        self.all_texture_tags: list[str] = []
+        self._grid_img_w: int = 0   # set in run(), used by lazy init
+        self._grid_img_h: int = 0
+        self._n_cols_grid: int = 0
+        self._n_rows_grid: int = 0
+        self.single_view_group_tag = "Caron Single View Group"
+        self.all_view_group_tag = "Caron All View Group"
+        self.show_all_tag = "Caron Show All Checkbox"
+
         # Colorscale limits
         self.clim_auto: bool = True
         self.clim_vmin: float = 0.0
@@ -159,12 +195,25 @@ class Visualization:
         frame = first_frame[self.viz_quantity_index]
         self.sim_nx = int(frame.shape[0])
         self.sim_ny = int(frame.shape[1])
+        self._render_bufs = [
+            np.zeros(self.sim_nx * self.sim_ny * 3, dtype=np.float32)
+            for _ in range(len(self.quantities))
+        ]
         image_w, image_h, window_width, window_height = self._compute_layout_size(self.sim_nx, self.sim_ny)
         frame_min = np.min(frame)
         frame_max = np.max(frame)
         frame_norm = (frame - frame_min) / (frame_max - frame_min)
         frame_rgb = np.stack((frame_norm,) * 3, axis=-1).astype(np.float32)
         self.frame_flattened: np.ndarray = frame_rgb.flatten()
+
+        # Store grid layout params for lazy all-mode initialisation
+        n_qty = len(self.quantities)
+        self._n_cols_grid = max(1, math.ceil(math.sqrt(n_qty)))
+        self._n_rows_grid = math.ceil(n_qty / self._n_cols_grid)
+        _grid_gap = 4
+        self._grid_img_w = max(60, (image_w - _grid_gap * (self._n_cols_grid - 1)) // self._n_cols_grid)
+        _aspect = self.sim_ny / max(self.sim_nx, 1)
+        self._grid_img_h = max(60, int(round(self._grid_img_w * _aspect)))
 
         # DearPyGui setup
         dpg.create_context()
@@ -203,7 +252,12 @@ class Visualization:
                     )
                 with dpg.group(label="Map & Keys", horizontal=True): # below there is the image and the buttons
                     with dpg.group(label='Colormap & Color Combo'): # image and color listbox on the left
-                        dpg.add_image(texture_tag=self.texture_tag, width=int(image_w), height=int(image_h))
+                        # Single-quantity view (default)
+                        with dpg.group(tag=self.single_view_group_tag, show=True):
+                            dpg.add_image(texture_tag=self.texture_tag, width=int(image_w), height=int(image_h))
+                        # All-quantities grid view — populated lazily on first toggle
+                        with dpg.group(tag=self.all_view_group_tag, show=False):
+                            pass
                         with dpg.group(label="Log visualization", horizontal=True):
                             dpg.add_combo(
                                 tag=self.cmap_list_tag,
@@ -219,6 +273,13 @@ class Visualization:
                                 default_value=self.viz_quantity,
                                 width=max(100, int(image_w * 0.35)),
                                 callback=_quantity_callback,
+                                user_data=self,
+                            )
+                            dpg.add_checkbox(
+                                label="All",
+                                tag=self.show_all_tag,
+                                default_value=self.show_all,
+                                callback=_toggle_all_callback,
                                 user_data=self,
                             )
                         with dpg.group(label="Colorscale", horizontal=True):
@@ -503,6 +564,44 @@ def _quantity_callback(_sender, app_data, user_data: Visualization):
     user_data.viz_quantity_index = user_data.quantities.index(app_data)
     _refresh_current_frame(user_data)
 
+def _toggle_all_callback(_sender, app_data, user_data: Visualization):
+    user_data.show_all = bool(app_data)
+    if user_data.show_all and not user_data._all_mode_initialized:
+        _init_all_mode(user_data)
+    dpg.configure_item(user_data.single_view_group_tag, show=not user_data.show_all)
+    dpg.configure_item(user_data.all_view_group_tag, show=user_data.show_all)
+    dpg.configure_item(user_data.quantity_tag, enabled=not user_data.show_all)
+    _refresh_current_frame(user_data)
+
+def _init_all_mode(user_data: Visualization) -> None:
+    """Create all-mode textures and image widgets on first toggle (lazy init)."""
+    n_qty = len(user_data.quantities)
+    with dpg.texture_registry():
+        for i in range(n_qty):
+            tag = f"frame_tag_all_{i}"
+            user_data.all_texture_tags.append(tag)
+            dpg.add_raw_texture(
+                user_data.sim_nx, user_data.sim_ny,
+                default_value=user_data._render_bufs[i].tolist(),
+                format=dpg.mvFormat_Float_rgb,
+                tag=tag,
+            )
+    for row in range(user_data._n_rows_grid):
+        row_group = dpg.add_group(horizontal=True, parent=user_data.all_view_group_tag)
+        for col in range(user_data._n_cols_grid):
+            i = row * user_data._n_cols_grid + col
+            if i >= n_qty:
+                break
+            cell = dpg.add_group(parent=row_group)
+            dpg.add_text(user_data.quantities[i], parent=cell)
+            dpg.add_image(
+                texture_tag=user_data.all_texture_tags[i],
+                width=user_data._grid_img_w,
+                height=user_data._grid_img_h,
+                parent=cell,
+            )
+    user_data._all_mode_initialized = True
+
 def _log_checkbox_callback(_sender, app_data, user_data: Visualization):
     user_data.log_scale = bool(app_data)
     dpg.configure_item(user_data.log_strength_tag, enabled=bool(app_data))
@@ -537,30 +636,46 @@ def _clim_max_callback(_sender, app_data, user_data: Visualization):
 
 # Frame rendering and updating
 # ----------------------------------------------------------------------
-def _render_frame(user_data: Visualization, frame: np.ndarray) -> None:
-    field = frame[user_data.viz_quantity_index]
-    if user_data.clim_auto:
-        vmin = float(np.min(field))
-        vmax = float(np.max(field))
-        # Mirror live range into the input fields so the user can see current values
-        # and switch to manual with sensible defaults already filled in
-        user_data._programmatic_slider_update = True
-        dpg.set_value(user_data.clim_min_tag, vmin)
-        dpg.set_value(user_data.clim_max_tag, vmax)
-        user_data._programmatic_slider_update = False
+def _render_quantity_to_texture(
+    user_data: Visualization,
+    frame: np.ndarray,
+    qty_idx: int,
+    tex_tag: str,
+    *,
+    update_clim_display: bool = False,
+    force_auto_clim: bool = False,
+) -> None:
+    """Apply colormap pipeline to one quantity channel and upload to a DPG texture."""
+    field = np.asarray(frame[qty_idx], dtype=np.float32)
+    auto = user_data.clim_auto or force_auto_clim
+    if auto:
+        vmin = float(field.min())
+        vmax = float(field.max())
+        if update_clim_display:
+            user_data._programmatic_slider_update = True
+            dpg.set_value(user_data.clim_min_tag, vmin)
+            dpg.set_value(user_data.clim_max_tag, vmax)
+            user_data._programmatic_slider_update = False
     else:
         vmin = user_data.clim_vmin
         vmax = user_data.clim_vmax
-    frame_norm = normalize_frame(field, vmin, vmax)
-    frame_norm = np.nan_to_num(frame_norm, nan=0.0, posinf=1.0, neginf=0.0)
-    # Apply LUT instead of colormap
-    indices = (frame_norm * 255).astype(np.uint8)
-    if user_data.log_scale:
-        indices = user_data.log_map[indices]
-    frame_rgb = user_data.current_lut[indices]
-    frame_flattened = frame_rgb.reshape(-1).astype(np.float32) / 255.0
-    with dpg.mutex():
-        dpg.set_value(user_data.texture_tag, frame_flattened)
+    buf = user_data._render_bufs[qty_idx]
+    apply_colormap_to_buffer(
+        field, vmin, vmax,
+        user_data.current_lut, user_data.log_map, user_data.log_scale,
+        buf,
+    )
+    dpg.set_value(tex_tag, buf)
+
+def _render_frame(user_data: Visualization, frame: np.ndarray) -> None:
+    if user_data.show_all:
+        for i, tag in enumerate(user_data.all_texture_tags):
+            _render_quantity_to_texture(user_data, frame, i, tag, force_auto_clim=True)
+    else:
+        _render_quantity_to_texture(
+            user_data, frame, user_data.viz_quantity_index, user_data.texture_tag,
+            update_clim_display=True,
+        )
 
 def _refresh_current_frame(user_data: Visualization) -> None:
     if user_data._last_frame is None:
